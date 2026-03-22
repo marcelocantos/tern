@@ -5,6 +5,11 @@ sqlite_mcp_server.db
 .swiftpm/
 .claude/worktrees/
 
+# Gradle/Android build artifacts
+android/.gradle/
+android/terncrypto/build/
+android/build/
+
 # TLC model checker artifacts
 formal/states/
 formal/*_TTrace_*

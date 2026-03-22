@@ -94,6 +94,38 @@ let encrypted = try channel.encrypt(plaintext)
 let plaintext  = try channel.decrypt(ciphertext)
 ```
 
+## Android/Kotlin Library
+
+Add via [JitPack](https://jitpack.io) (Gradle):
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        maven("https://jitpack.io")
+    }
+}
+
+// build.gradle.kts
+dependencies {
+    implementation("com.github.marcelocantos.tern:terncrypto:v0.1.0")
+}
+```
+
+Requires JDK 17+ / Android API 33+ (for X25519).
+
+```kotlin
+// Key exchange
+val kp = E2EKeyPair()
+// ... send kp.publicKeyData (32 bytes); receive peerPubBytes ...
+val sessionKey = kp.deriveSessionKey(peerPubBytes, "client-to-server".toByteArray())
+
+// Encrypted channel from shared key
+val channel = E2EChannel(sharedKey, isServer = false)
+val encrypted = channel.encrypt(plaintext)
+val plaintext = channel.decrypt(ciphertext)
+```
+
 ## Pairing Ceremony
 
 The full ceremony involves three actors — **server** (backend daemon),

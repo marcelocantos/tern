@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-// protogen generates Go, Swift, TLA+, and PlantUML from a YAML
+// protogen generates Go, Swift, Kotlin, TLA+, and PlantUML from a YAML
 // protocol definition.
 //
 // Usage:
@@ -14,6 +14,7 @@
 //	formal/<Name>.tla
 //	docs/<name>.puml
 //	Sources/TernCrypto/<Name>Machine.swift
+//	android/terncrypto/src/main/kotlin/com/marcelocantos/tern/crypto/<Name>Machine.kt
 package main
 
 import (
@@ -83,6 +84,19 @@ func main() {
 				return writeFile(
 					filepath.Join("Sources", "TernCrypto", p.Name+"Machine.swift"),
 					func(f *os.File) error { return p.ExportSwift(f) },
+				)
+			},
+		},
+		{
+			path: filepath.Join("android", "terncrypto", "src", "main", "kotlin",
+				"com", "marcelocantos", "tern", "crypto", p.Name+"Machine.kt"),
+			gen: func() error {
+				return writeFile(
+					filepath.Join("android", "terncrypto", "src", "main", "kotlin",
+						"com", "marcelocantos", "tern", "crypto", p.Name+"Machine.kt"),
+					func(f *os.File) error {
+						return p.ExportKotlin(f, "com.marcelocantos.tern.crypto")
+					},
 				)
 			},
 		},

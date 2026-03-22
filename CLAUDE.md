@@ -20,6 +20,7 @@ go build -o tern .                # build relay server
 go test ./...                     # all Go tests (relay, crypto, protocol, E2E)
 go test -run TestE2E              # E2E integration test only
 swift test                        # Swift crypto + state machine tests
+JAVA_HOME=<jdk21> android/gradlew -p android test  # Kotlin tests
 go run ./cmd/protogen protocol/pairing.yaml  # regenerate from YAML spec
 ```
 
@@ -71,6 +72,13 @@ Run with `./formal/tlc PairingCeremony`.
 SPM library (`TernCrypto`) containing E2ECrypto.swift and the generated
 PairingCeremonyMachine.swift. iOS apps add the GitHub repo as a package
 dependency.
+
+### Android/Kotlin Library (`android/terncrypto/`)
+
+Kotlin/JVM library mirroring TernCrypto: `E2EKeyPair`, `E2EChannel`,
+`Hkdf`, and the generated `PairingCeremonyMachine.kt`. Consumed via
+JitPack (`com.github.marcelocantos.tern:terncrypto:<tag>`).
+Requires JDK 17+ / Android API 33+ (for X25519 support).
 
 ## Deployment
 
