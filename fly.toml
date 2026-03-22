@@ -1,4 +1,4 @@
-app = "tern-relay"
+app = "tern"
 primary_region = "syd"
 
 [build]
