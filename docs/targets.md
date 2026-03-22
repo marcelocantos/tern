@@ -1,11 +1,10 @@
 # Convergence Targets
 
-## 🎯T1 E2E encryption and pairing ceremony are part of tern
+## 🎯T1 Tern is a complete library for opaque authenticated relay
 
-The crypto library (X25519 ECDH, AES-256-GCM, HKDF key derivation),
-pairing ceremony protocol spec, and TLA+ formal model live in this
-repo — not jevon. Tern's value proposition is opaque relay with
-authenticated pairing, not just dumb forwarding.
+All crypto, protocol state machines, code generators, QR helper, and
+Swift package live here. Applications import tern rather than duplicating
+relay/pairing logic.
 
 **Sub-targets:**
 
@@ -29,10 +28,39 @@ Ephemeral state files and trace files excluded.
 
 Status: done
 
-### 🎯T1.4 Jevon imports tern's crypto package
+### 🎯T1.4 Protocol state machine framework migrated from jevon
 
-Jevon's `internal/crypto/` is replaced by an import of
-`github.com/marcelocantos/tern/crypto`. This validates that the
-extraction is clean.
+`protocol/` package: declarative state machine framework with YAML
+parser, runtime executor, and code generators (Go, Swift, TLA+,
+PlantUML). `cmd/protogen/` generates all outputs from YAML spec.
 
-Status: not started (depends on 🎯T1.1)
+Status: done
+
+### 🎯T1.5 QR helper migrated from jevon
+
+`qr/` package: terminal QR code rendering and LAN IP detection.
+Jevon-specific URL scheme removed.
+
+Status: done
+
+### 🎯T1.6 Swift package (SPM)
+
+`Package.swift` at repo root, `Sources/TernCrypto/` with E2ECrypto.swift
+and generated PairingCeremonyMachine.swift. All types public. Tests pass.
+
+Status: done
+
+### 🎯T1.7 E2E integration test
+
+Full-stack test exercising relay + ECDH pairing + confirmation codes +
+encrypted bidirectional messaging. Verifies relay only sees ciphertext.
+
+Status: done
+
+### 🎯T1.8 Jevon imports tern's packages
+
+Jevon's `internal/crypto/`, `internal/protocol/`, `internal/qr/`, and
+`cmd/protogen/` are replaced by imports from tern. iOS app imports
+TernCrypto SPM package. This validates the extraction is clean.
+
+Status: not started (requires tern to be tagged and pushed)
