@@ -1,2 +1,8 @@
 /tern
 .DS_Store
+sqlite_mcp_server.db
+
+# TLC model checker artifacts
+formal/states/
+formal/*_TTrace_*
+formal/tla2tools.jar
