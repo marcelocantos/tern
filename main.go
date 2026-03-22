@@ -13,8 +13,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -25,6 +27,9 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+//go:embed agents-guide.md
+var agentGuide string
 
 // version is set at build time via -ldflags "-X main.version=v0.1.0".
 var version = "dev"
@@ -214,8 +219,11 @@ func main() {
 	}
 
 	if *helpAgent {
-		// TODO: embed agents-guide.md when one exists.
+		var buf bytes.Buffer
+		flag.CommandLine.SetOutput(&buf)
 		flag.Usage()
+		fmt.Print(buf.String())
+		fmt.Println(agentGuide)
 		os.Exit(0)
 	}
 

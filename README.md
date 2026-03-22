@@ -31,6 +31,10 @@ The relay server handles only ciphertext and has no access to session keys.
 
 ## Go Library
 
+```bash
+go get github.com/marcelocantos/tern
+```
+
 ```go
 import (
     "github.com/marcelocantos/tern/crypto"
@@ -45,6 +49,28 @@ import (
 | `protocol/`| Declarative state machine framework and pairing ceremony     |
 | `qr/`      | Terminal QR code rendering and LAN IP detection              |
 
+**Quick integration — encrypted channel:**
+
+```go
+// Both sides generate an ephemeral key pair and exchange public keys.
+kp, _ := crypto.GenerateKeyPair()
+// ... send kp.Public.Bytes() to peer; receive peerPubBytes ...
+peerPub, _ := ecdh.X25519().NewPublicKey(peerPubBytes)
+
+// Derive directional session keys and open an encrypted channel.
+sendKey, _ := crypto.DeriveSessionKey(kp.Private, peerPub, []byte("client-to-server"))
+recvKey, _ := crypto.DeriveSessionKey(kp.Private, peerPub, []byte("server-to-client"))
+ch, _ := crypto.NewChannel(sendKey, recvKey)
+
+// Verify the pairing is MitM-free (show 6-digit codes on both devices).
+code, _ := crypto.DeriveConfirmationCode(kp.Public, peerPub)
+fmt.Println("Confirmation code:", code) // e.g. "042857"
+
+// Encrypt / decrypt messages sent through the relay.
+encrypted := ch.Encrypt([]byte("hello"))
+plaintext, _ := ch.Decrypt(encrypted)
+```
+
 ## Swift Package
 
 Add the GitHub repo as an SPM dependency:
@@ -56,6 +82,37 @@ https://github.com/marcelocantos/tern
 The package provides the `TernCrypto` library (iOS 16+, macOS 13+)
 containing `E2ECrypto.swift` (key exchange and encrypted channel) and
 the generated `PairingCeremonyMachine.swift`.
+
+```swift
+// Both sides exchange public key bytes through the relay.
+let kp = E2EKeyPair()
+// ... send kp.publicKeyData; receive peerPubBytes ...
+let sessionKey = try kp.deriveSessionKey(peerPublicKey: peerPubBytes,
+                                         info: Data("client-to-server".utf8))
+let channel = E2EChannel(sharedKey: sessionKey, isServer: false)
+let encrypted = try channel.encrypt(plaintext)
+let plaintext  = try channel.decrypt(ciphertext)
+```
+
+## Pairing Ceremony
+
+The full ceremony involves three actors — **server** (backend daemon),
+**mobile** (iOS client), and **CLI** (initiator):
+
+1. CLI sends `pair_begin` to server; server generates a one-time token,
+   connects to the relay (`/register`), and receives an instance ID.
+2. Server displays a QR code encoding the relay URL, token, and instance ID.
+3. Mobile scans the QR, connects to `/ws/{id}`, generates an X25519 key pair,
+   and sends `{token, pubkey}` to the server through the relay.
+4. Server verifies the token, performs ECDH, derives the session key, and sends
+   `pair_hello_ack {pubkey}` back. Mobile performs ECDH and derives the same key.
+5. Both sides independently compute the 6-digit confirmation code from the two
+   public keys. The server signals CLI to show the code; mobile shows it on screen.
+   The user verifies the codes match — a mismatch means a MitM is present.
+6. CLI submits the code the user entered. If correct, the server sends
+   `pair_complete {secret, key}` to mobile and `pair_status` to CLI. Pairing done.
+
+![Pairing ceremony state machines](docs/PairingCeremony.svg)
 
 ## Running the Relay Server
 
@@ -74,6 +131,21 @@ are included).
 | `GET /health`      | Health check (returns `{"status":"ok"}`) |
 | `GET /register`    | Backend registers (WebSocket upgrade)|
 | `GET /ws/{id}`     | Client connects by instance ID       |
+
+## Configuration
+
+| Flag / Env var | Default | Description |
+|----------------|---------|-------------|
+| `--port` / `PORT` | `8080` | Listening port |
+| `--version` | — | Print version and exit |
+| `--help-agent` | — | Print usage + agent guide |
+
+Build-time version injection: `go build -ldflags "-X main.version=v1.0.0" .`
+
+Max WebSocket frame size: 1 MiB (constant `maxMessageSize` in `main.go`).
+
+CORS origin pattern is `*` by default — the relay bridges arbitrary
+origins. Restrict `OriginPatterns` in `registerRoutes` if needed for your deployment.
 
 ## Running Tests
 

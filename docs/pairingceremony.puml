@@ -3,7 +3,7 @@
 
 title PairingCeremony — Parallel State Machines
 
-state "jevond" as D {
+state "server" as D {
   [*] --> D_Idle
   D_Idle --> D_GenerateToken : recv pair_begin\ngenerate_token
   D_GenerateToken --> D_RegisterRelay : token created\nregister_relay
