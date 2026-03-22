@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,17 +20,9 @@ import (
 	"github.com/marcelocantos/tern/crypto"
 )
 
-// TestE2EPairingAndEncryptedRelay exercises the full stack:
-//
-//  1. Start relay
-//  2. Backend registers, gets instance ID
-//  3. Client connects via /ws/{id}
-//  4. Pairing ceremony: ECDH key exchange through relay, confirmation code
-//  5. Encrypted channel established
-//  6. Encrypted messages flow bidirectionally
-//  7. Relay sees only ciphertext
+// TestE2EPairingAndEncryptedRelay exercises the full stack against a
+// local httptest relay.
 func TestE2EPairingAndEncryptedRelay(t *testing.T) {
-	// Start relay.
 	r := newRelay()
 	mux := http.NewServeMux()
 	registerRoutes(mux, r)
@@ -37,7 +30,34 @@ func TestE2EPairingAndEncryptedRelay(t *testing.T) {
 	defer ts.Close()
 
 	wsBase := "ws" + strings.TrimPrefix(ts.URL, "http")
-	ctx := context.Background()
+	runE2EPairingTest(t, wsBase)
+}
+
+// TestLiveE2EPairingAndEncryptedRelay runs the same E2E test against a
+// deployed relay. Set TERN_LIVE_URL to the relay's base URL to enable:
+//
+//	TERN_LIVE_URL=wss://tern.fly.dev go test -run TestLiveE2E -v
+//
+// Skipped when TERN_LIVE_URL is not set.
+func TestLiveE2EPairingAndEncryptedRelay(t *testing.T) {
+	liveURL := os.Getenv("TERN_LIVE_URL")
+	if liveURL == "" {
+		t.Skip("TERN_LIVE_URL not set; skipping live relay test")
+	}
+	runE2EPairingTest(t, liveURL)
+}
+
+// runE2EPairingTest exercises:
+//  1. Backend registers, gets instance ID
+//  2. Client connects via /ws/{id}
+//  3. Pairing ceremony: ECDH key exchange through relay, confirmation code
+//  4. Encrypted channel established
+//  5. Encrypted messages flow bidirectionally
+//  6. Relay sees only ciphertext
+func runE2EPairingTest(t *testing.T, wsBase string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
 	// Backend registers.
 	backendConn, _, err := websocket.Dial(ctx, wsBase+"/register", nil)
@@ -83,9 +103,7 @@ func TestE2EPairingAndEncryptedRelay(t *testing.T) {
 	}
 
 	// Backend receives pair_hello through relay.
-	rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	_, helloData, err := backendConn.Read(rctx)
+	_, helloData, err := backendConn.Read(ctx)
 	if err != nil {
 		t.Fatalf("backend read pair_hello: %v", err)
 	}
@@ -118,9 +136,7 @@ func TestE2EPairingAndEncryptedRelay(t *testing.T) {
 	}
 
 	// Client receives pair_hello_ack.
-	rctx2, cancel2 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel2()
-	_, ackData, err := clientConn.Read(rctx2)
+	_, ackData, err := clientConn.Read(ctx)
 	if err != nil {
 		t.Fatalf("client read pair_hello_ack: %v", err)
 	}
@@ -194,9 +210,7 @@ func TestE2EPairingAndEncryptedRelay(t *testing.T) {
 	}
 
 	// Backend receives and decrypts.
-	rctx3, cancel3 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel3()
-	mt, relayedData, err := backendConn.Read(rctx3)
+	mt, relayedData, err := backendConn.Read(ctx)
 	if err != nil {
 		t.Fatalf("backend read encrypted: %v", err)
 	}
@@ -226,9 +240,7 @@ func TestE2EPairingAndEncryptedRelay(t *testing.T) {
 	}
 
 	// Client receives and decrypts.
-	rctx4, cancel4 := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel4()
-	mt, relayedReply, err := clientConn.Read(rctx4)
+	mt, relayedReply, err := clientConn.Read(ctx)
 	if err != nil {
 		t.Fatalf("client read encrypted: %v", err)
 	}
