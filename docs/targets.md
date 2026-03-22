@@ -215,3 +215,13 @@ manually with `fly deploy`.
 
 Status: not started
 
+---
+
+## 🎯T4 Bearer token auth on /register
+
+/register requires `Authorization: Bearer <token>` when `TERN_TOKEN`
+env var is set. /ws/{id} remains open (instance IDs are unguessable).
+Fly.io deployment uses a random 256-bit token.
+
+Status: done
+

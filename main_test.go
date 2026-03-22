@@ -19,7 +19,7 @@ func startTestRelay(t *testing.T) *httptest.Server {
 	t.Helper()
 	r := newRelay()
 	mux := http.NewServeMux()
-	registerRoutes(mux, r)
+	registerRoutes(mux, r, "")
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return ts
@@ -227,6 +227,55 @@ func TestSecondClientRejected(t *testing.T) {
 	}
 	if resp != nil && resp.StatusCode != http.StatusConflict {
 		t.Fatalf("second client status = %d, want %d", resp.StatusCode, http.StatusConflict)
+	}
+}
+
+func TestRegisterRequiresToken(t *testing.T) {
+	r := newRelay()
+	mux := http.NewServeMux()
+	registerRoutes(mux, r, "secret-token")
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// No token → 401.
+	_, resp, err := websocket.Dial(ctx, wsURL(ts, "/register"), nil)
+	if err == nil {
+		t.Fatal("dial without token should fail")
+	}
+	if resp != nil && resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+
+	// Wrong token → 401.
+	_, resp, err = websocket.Dial(ctx, wsURL(ts, "/register"), &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {"Bearer wrong"}},
+	})
+	if err == nil {
+		t.Fatal("dial with wrong token should fail")
+	}
+	if resp != nil && resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+
+	// Correct token → success (WebSocket upgrade).
+	conn, _, err := websocket.Dial(ctx, wsURL(ts, "/register"), &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {"Bearer secret-token"}},
+	})
+	if err != nil {
+		t.Fatalf("dial with correct token: %v", err)
+	}
+	defer conn.CloseNow()
+
+	// Should receive an instance ID.
+	_, id, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read instance ID: %v", err)
+	}
+	if len(id) == 0 {
+		t.Fatal("empty instance ID")
 	}
 }
 

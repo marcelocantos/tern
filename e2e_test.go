@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,18 +25,24 @@ import (
 func TestE2EPairingAndEncryptedRelay(t *testing.T) {
 	r := newRelay()
 	mux := http.NewServeMux()
-	registerRoutes(mux, r)
+	registerRoutes(mux, r, "")
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
 	wsBase := "ws" + strings.TrimPrefix(ts.URL, "http")
-	runE2EPairingTest(t, wsBase)
+	runE2EPairingTest(t, wsBase, nil)
 }
 
 // TestLiveE2EPairingAndEncryptedRelay runs the same E2E test against the
-// deployed relay at tern.fly.dev.
+// deployed relay at tern.fly.dev. Requires TERN_TOKEN to be set.
 func TestLiveE2EPairingAndEncryptedRelay(t *testing.T) {
-	runE2EPairingTest(t, "wss://tern.fly.dev")
+	token := os.Getenv("TERN_TOKEN")
+	if token == "" {
+		t.Skip("TERN_TOKEN not set; skipping live relay test")
+	}
+	runE2EPairingTest(t, "wss://tern.fly.dev", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {"Bearer " + token}},
+	})
 }
 
 // runE2EPairingTest exercises:
@@ -45,13 +52,13 @@ func TestLiveE2EPairingAndEncryptedRelay(t *testing.T) {
 //  4. Encrypted channel established
 //  5. Encrypted messages flow bidirectionally
 //  6. Relay sees only ciphertext
-func runE2EPairingTest(t *testing.T, wsBase string) {
+func runE2EPairingTest(t *testing.T, wsBase string, dialOpts *websocket.DialOptions) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// Backend registers.
-	backendConn, _, err := websocket.Dial(ctx, wsBase+"/register", nil)
+	backendConn, _, err := websocket.Dial(ctx, wsBase+"/register", dialOpts)
 	if err != nil {
 		t.Fatalf("backend register: %v", err)
 	}

@@ -89,7 +89,8 @@ func generateID() string {
 }
 
 // registerRoutes sets up HTTP and WebSocket handlers on mux.
-func registerRoutes(mux *http.ServeMux, r *relay) {
+// If token is non-empty, /register requires a matching Bearer token.
+func registerRoutes(mux *http.ServeMux, r *relay, token string) {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
@@ -99,6 +100,13 @@ func registerRoutes(mux *http.ServeMux, r *relay) {
 	// it back as the first text message. Then the connection stays open
 	// for bidirectional bridging with clients.
 	mux.HandleFunc("GET /register", func(w http.ResponseWriter, req *http.Request) {
+		if token != "" {
+			auth := req.Header.Get("Authorization")
+			if auth != "Bearer "+token {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+		}
 		conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{
 			// CORS wildcard is intentional: the relay bridges arbitrary
 			// backends and clients that may run on any origin. Deployers
@@ -235,13 +243,17 @@ func main() {
 		listenPort = "8080"
 	}
 
+	// TERN_TOKEN restricts /register to authorized backends.
+	// If unset, registration is open.
+	token := os.Getenv("TERN_TOKEN")
+
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
 
 	r := newRelay()
 	mux := http.NewServeMux()
-	registerRoutes(mux, r)
+	registerRoutes(mux, r, token)
 
 	addr := ":" + listenPort
 	slog.Info("tern starting", "addr", addr, "version", version)
