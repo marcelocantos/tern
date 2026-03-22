@@ -46,7 +46,10 @@ Status: not started (requires tern to be tagged and pushed)
 
 ---
 
-## 🎯T2 Open-source ready
+## 🎯T2 Open-source ready — gates v0.1.0
+
+All sub-targets must be done before the v0.1.0 release. No exceptions
+without explicit user override.
 
 Audit findings from 2026-03-22 addressed. Tern is a credible public
 project with correct code, proper licensing, documentation, and CI.
