@@ -18,6 +18,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/marcelocantos/tern/crypto"
+	ternrelay "github.com/marcelocantos/tern/relay"
 )
 
 // TestE2EPairingAndEncryptedRelay exercises the full stack against a
@@ -30,7 +31,7 @@ func TestE2EPairingAndEncryptedRelay(t *testing.T) {
 	defer ts.Close()
 
 	wsBase := "ws" + strings.TrimPrefix(ts.URL, "http")
-	runE2EPairingTest(t, wsBase, nil)
+	runE2EPairingTest(t, wsBase)
 }
 
 // TestLiveE2EPairingAndEncryptedRelay runs the same E2E test against the
@@ -40,44 +41,35 @@ func TestLiveE2EPairingAndEncryptedRelay(t *testing.T) {
 	if token == "" {
 		t.Skip("TERN_TOKEN not set; skipping live relay test")
 	}
-	runE2EPairingTest(t, "wss://tern.fly.dev", &websocket.DialOptions{
-		HTTPHeader: http.Header{"Authorization": {"Bearer " + token}},
-	})
+	runE2EPairingTest(t, "wss://tern.fly.dev", ternrelay.WithToken(token))
 }
 
 // runE2EPairingTest exercises:
 //  1. Backend registers, gets instance ID
-//  2. Client connects via /ws/{id}
+//  2. Client connects via instance ID
 //  3. Pairing ceremony: ECDH key exchange through relay, confirmation code
 //  4. Encrypted channel established
 //  5. Encrypted messages flow bidirectionally
 //  6. Relay sees only ciphertext
-func runE2EPairingTest(t *testing.T, wsBase string, dialOpts *websocket.DialOptions) {
+func runE2EPairingTest(t *testing.T, wsBase string, opts ...ternrelay.Option) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Backend registers.
-	backendConn, _, err := websocket.Dial(ctx, wsBase+"/register", dialOpts)
+	// Backend registers via relay package.
+	backend, err := ternrelay.Register(ctx, wsBase, opts...)
 	if err != nil {
 		t.Fatalf("backend register: %v", err)
 	}
-	defer backendConn.CloseNow()
+	defer backend.CloseNow()
+	t.Logf("Backend registered as %s", backend.InstanceID())
 
-	// Read instance ID.
-	_, idBytes, err := backendConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("read instance ID: %v", err)
-	}
-	instanceID := string(idBytes)
-	t.Logf("Backend registered as %s", instanceID)
-
-	// Client connects.
-	clientConn, _, err := websocket.Dial(ctx, wsBase+"/ws/"+instanceID, nil)
+	// Client connects via relay package.
+	client, err := ternrelay.Connect(ctx, wsBase, backend.InstanceID())
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
 	}
-	defer clientConn.CloseNow()
+	defer client.CloseNow()
 
 	// --- Pairing ceremony ---
 
@@ -96,12 +88,12 @@ func runE2EPairingTest(t *testing.T, wsBase string, dialOpts *websocket.DialOpti
 		"type":   "pair_hello",
 		"pubkey": base64.StdEncoding.EncodeToString(clientKP.Public.Bytes()),
 	})
-	if err := clientConn.Write(ctx, websocket.MessageText, pairHello); err != nil {
+	if err := client.Send(ctx, websocket.MessageText, pairHello); err != nil {
 		t.Fatalf("client write pair_hello: %v", err)
 	}
 
 	// Backend receives pair_hello through relay.
-	_, helloData, err := backendConn.Read(ctx)
+	_, helloData, err := backend.Recv(ctx)
 	if err != nil {
 		t.Fatalf("backend read pair_hello: %v", err)
 	}
@@ -129,12 +121,12 @@ func runE2EPairingTest(t *testing.T, wsBase string, dialOpts *websocket.DialOpti
 		"type":   "pair_hello_ack",
 		"pubkey": base64.StdEncoding.EncodeToString(backendKP.Public.Bytes()),
 	})
-	if err := backendConn.Write(ctx, websocket.MessageText, ack); err != nil {
+	if err := backend.Send(ctx, websocket.MessageText, ack); err != nil {
 		t.Fatalf("backend write pair_hello_ack: %v", err)
 	}
 
 	// Client receives pair_hello_ack.
-	_, ackData, err := clientConn.Read(ctx)
+	_, ackData, err := client.Recv(ctx)
 	if err != nil {
 		t.Fatalf("client read pair_hello_ack: %v", err)
 	}
@@ -203,12 +195,12 @@ func runE2EPairingTest(t *testing.T, wsBase string, dialOpts *websocket.DialOpti
 	plaintext := []byte("secret message from client")
 	ciphertext := clientCh.Encrypt(plaintext)
 
-	if err := clientConn.Write(ctx, websocket.MessageBinary, ciphertext); err != nil {
+	if err := client.Send(ctx, websocket.MessageBinary, ciphertext); err != nil {
 		t.Fatalf("client write encrypted: %v", err)
 	}
 
 	// Backend receives and decrypts.
-	mt, relayedData, err := backendConn.Read(ctx)
+	mt, relayedData, err := backend.Recv(ctx)
 	if err != nil {
 		t.Fatalf("backend read encrypted: %v", err)
 	}
@@ -233,12 +225,12 @@ func runE2EPairingTest(t *testing.T, wsBase string, dialOpts *websocket.DialOpti
 	reply := []byte("secret reply from backend")
 	replyCiphertext := backendCh.Encrypt(reply)
 
-	if err := backendConn.Write(ctx, websocket.MessageBinary, replyCiphertext); err != nil {
+	if err := backend.Send(ctx, websocket.MessageBinary, replyCiphertext); err != nil {
 		t.Fatalf("backend write encrypted: %v", err)
 	}
 
 	// Client receives and decrypts.
-	mt, relayedReply, err := clientConn.Read(ctx)
+	mt, relayedReply, err := client.Recv(ctx)
 	if err != nil {
 		t.Fatalf("client read encrypted: %v", err)
 	}
