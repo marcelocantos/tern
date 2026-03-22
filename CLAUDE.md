@@ -55,6 +55,13 @@ Declarative state machine framework. Protocols are defined in YAML
 
 Reads YAML, validates, and generates Go/Swift/TLA+/PlantUML outputs.
 
+### Relay Client (`relay/`)
+
+Client-side connectivity to a tern relay server. Backends call
+`relay.Register()` to get an instance ID; clients call
+`relay.Connect()` with the ID. Both return a `Conn` with `Send`/`Recv`.
+Supports bearer token auth via `relay.WithToken()`.
+
 ### QR Helper (`qr/`)
 
 Terminal QR code rendering and LAN IP detection for device pairing flows.

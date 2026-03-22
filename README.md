@@ -37,6 +37,7 @@ go get github.com/marcelocantos/tern
 
 ```go
 import (
+    "github.com/marcelocantos/tern/relay"
     "github.com/marcelocantos/tern/crypto"
     "github.com/marcelocantos/tern/protocol"
     "github.com/marcelocantos/tern/qr"
@@ -45,11 +46,28 @@ import (
 
 | Package    | Purpose                                                     |
 |------------|-------------------------------------------------------------|
+| `relay/`   | Client-side relay connectivity (register, connect, send/recv)|
 | `crypto/`  | X25519 key exchange, AES-256-GCM channel, confirmation code |
 | `protocol/`| Declarative state machine framework and pairing ceremony     |
 | `qr/`      | Terminal QR code rendering and LAN IP detection              |
 
-**Quick integration — encrypted channel:**
+**Quick integration — relay + encrypted channel:**
+
+```go
+// Backend registers with the relay.
+backend, _ := relay.Register(ctx, "wss://tern.fly.dev",
+    relay.WithToken(os.Getenv("TERN_TOKEN")))
+fmt.Println("Instance ID:", backend.InstanceID()) // share via QR code
+
+// Client connects by instance ID (obtained from QR scan).
+client, _ := relay.Connect(ctx, "wss://tern.fly.dev", instanceID)
+
+// Send/receive through the relay (plaintext or encrypted).
+client.Send(ctx, websocket.MessageBinary, ciphertext)
+mt, data, _ := backend.Recv(ctx)
+```
+
+**Encrypted channel:**
 
 ```go
 // Both sides generate an ephemeral key pair and exchange public keys.
