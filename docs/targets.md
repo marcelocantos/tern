@@ -225,3 +225,66 @@ Fly.io deployment uses a random 256-bit token.
 
 Status: done
 
+---
+
+## 🎯T5 Multi-transport with LAN upgrade
+
+Devices connected through the relay can discover they're on the same
+LAN and upgrade to a direct connection. The `tern.Conn` abstraction
+hides this — callers see a single ordered message stream regardless
+of transport.
+
+### 🎯T5.1 Reorder-tolerant decryption
+
+`Channel.Decrypt` buffers out-of-order sequence numbers instead of
+rejecting them. Required for safe transport cutover.
+
+Status: not started
+
+### 🎯T5.2 LAN discovery via relay
+
+After the encrypted channel is established, both sides exchange their
+local IP addresses through the relay. Each attempts a direct WebSocket
+to the peer's local address.
+
+Status: not started
+
+### 🎯T5.3 Cutover protocol
+
+Each side sends a `CUTOVER` marker as its final message on the old
+transport, then sends subsequent messages on the new transport. The
+receiver reads from both transports, orders by sequence number, and
+closes the old transport after receiving `CUTOVER`.
+
+Status: not started
+
+### 🎯T5.4 Transport-agnostic Conn
+
+`tern.Conn` manages multiple underlying transports. Sends go on the
+preferred transport; receives come from any transport and are delivered
+in sequence order. Upgrading and downgrading are transparent to the
+caller.
+
+Status: not started
+
+---
+
+## 🎯T6 Investigate Bluetooth as proximity oracle
+
+Bluetooth as a proximity signal rather than a data channel. Possible
+uses:
+
+- **Pairing trust signal**: if both devices see each other over
+  Bluetooth during the pairing ceremony, they're physically co-located.
+  Could supplement or replace the 6-digit confirmation code.
+- **Transport upgrade hint**: Bluetooth discovery indicates the
+  devices are nearby, making LAN direct connection likely to succeed.
+- **Proximity-gated handover**: only attempt LAN upgrade when
+  Bluetooth confirms proximity, avoiding wasted connection attempts.
+
+Needs investigation: BLE advertising APIs on iOS/Android, power and
+battery implications, interaction with existing pairing ceremony,
+privacy considerations (Bluetooth MAC address rotation).
+
+Status: not started
+
