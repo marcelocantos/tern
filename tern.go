@@ -16,6 +16,7 @@ package tern
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"fmt"
 	"net/http"
@@ -32,6 +33,10 @@ type Option func(*options)
 type options struct {
 	token    string
 	dialOpts *websocket.DialOptions
+
+	// WebTransport options.
+	useWebTransport bool
+	wtTLSConfig     *tls.Config
 }
 
 // WithToken sets the bearer token for authentication on /register.

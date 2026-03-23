@@ -330,7 +330,7 @@ Serve WebTransport alongside (or instead of) WebSocket on the relay.
 Use `quic-go/webtransport-go`. Fly.io handles TLS. Same endpoints:
 /register, /ws/{id}, /health. Bridge bidirectional streams + datagrams.
 
-Status: not started
+Status: done
 
 ### 🎯T8.2 Non-strict Channel.Decrypt for datagrams
 
@@ -346,7 +346,7 @@ Status: not started
 WebTransport Conn transport in the root tern package. Register and
 Connect over WebTransport when available, with WebSocket fallback.
 
-Status: not started
+Status: done
 
 ### 🎯T8.4 Web/TypeScript WebTransport client
 

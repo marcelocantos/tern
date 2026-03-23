@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	wt "github.com/quic-go/webtransport-go"
 
 	"github.com/marcelocantos/tern/crypto"
 	"github.com/marcelocantos/tern/qr"
@@ -80,6 +81,11 @@ type Conn struct {
 	lanAttempted bool
 	lanListener  net.Listener
 	lanPort      int // port the LAN listener is bound to
+
+	// WebTransport state. Non-nil when using WebTransport transport.
+	isWT      bool
+	wtSession *wt.Session
+	wtStream  *wt.Stream
 }
 
 type appMsg struct {
@@ -151,7 +157,11 @@ func (c *Conn) SetChannel(ch *crypto.Channel) {
 func (c *Conn) Send(ctx context.Context, mt websocket.MessageType, data []byte) error {
 	c.mu.Lock()
 	ch := c.channel
-	t := c.transports[c.preferred]
+	isWT := c.isWT
+	var t *transport
+	if !isWT {
+		t = c.transports[c.preferred]
+	}
 	c.mu.Unlock()
 
 	if ch != nil {
@@ -159,7 +169,13 @@ func (c *Conn) Send(ctx context.Context, mt websocket.MessageType, data []byte) 
 		framed[0] = msgApp
 		copy(framed[1:], data)
 		encrypted := ch.Encrypt(framed)
+		if isWT {
+			return writeWTMessage(c.wtStream, encrypted)
+		}
 		return t.ws.Write(ctx, websocket.MessageBinary, encrypted)
+	}
+	if isWT {
+		return writeWTMessage(c.wtStream, data)
 	}
 	return t.ws.Write(ctx, mt, data)
 }
@@ -575,6 +591,9 @@ func (c *Conn) Close() error {
 	if c.lanListener != nil {
 		c.lanListener.Close()
 	}
+	if c.wtSession != nil {
+		return c.wtSession.CloseWithError(0, "")
+	}
 	var firstErr error
 	for _, t := range c.transports {
 		if err := t.ws.Close(websocket.StatusNormalClosure, ""); err != nil && firstErr == nil {
@@ -592,6 +611,9 @@ func (c *Conn) CloseNow() error {
 	if c.lanListener != nil {
 		c.lanListener.Close()
 	}
+	if c.wtSession != nil {
+		return c.wtSession.CloseWithError(0, "")
+	}
 	var firstErr error
 	for _, t := range c.transports {
 		if err := t.ws.CloseNow(); err != nil && firstErr == nil {
@@ -605,10 +627,15 @@ func (c *Conn) CloseNow() error {
 func (c *Conn) PreferredTransport() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.isWT {
+		return "webtransport"
+	}
 	return c.transports[c.preferred].name
 }
 
 // SetReadLimit sets the maximum message size on all transports.
+// For WebTransport connections, this is a no-op (message size is
+// controlled by the length-prefix framing).
 func (c *Conn) SetReadLimit(n int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
