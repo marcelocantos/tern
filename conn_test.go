@@ -395,6 +395,23 @@ func TestEncryptedDatagramRoundTrip(t *testing.T) {
 	})
 }
 
+// TestOpenStream verifies that OpenStream succeeds on an established Conn.
+// The relay currently only bridges the primary stream; additional streams
+// are not forwarded to the peer. This test confirms the stream opens without
+// error. End-to-end multi-stream relay requires server-side support —
+// see the TODO in session.go (bridgeClient).
+func TestOpenStream(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		b, _ := connectPair(t, env)
+
+		stream, err := b.OpenStream()
+		if err != nil {
+			t.Fatalf("OpenStream: %v", err)
+		}
+		defer stream.Close()
+	})
+}
+
 func TestMultipleMessages(t *testing.T) {
 	forEachRelay(t, func(t *testing.T, env relayEnv) {
 		ctx := context.Background()

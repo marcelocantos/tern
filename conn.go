@@ -28,6 +28,12 @@ type datagrammer interface {
 	ReceiveDatagram(context.Context) ([]byte, error)
 }
 
+// streamOpener can open additional bidirectional streams on the underlying
+// QUIC connection or WebTransport session.
+type streamOpener interface {
+	OpenStream() (io.ReadWriteCloser, error)
+}
+
 // deadliner can set read/write deadlines on a stream.
 type deadliner interface {
 	SetReadDeadline(time.Time) error
@@ -50,6 +56,7 @@ type Conn struct {
 	stream io.ReadWriteCloser // primary bidirectional stream (quic.Stream or webtransport.Stream)
 	dg     datagrammer        // datagram interface (quic.Connection or webtransport.Session)
 	closer io.Closer          // the session/connection itself
+	opener streamOpener       // opens additional bidirectional streams
 
 	// Encryption for the primary stream. Nil means raw mode.
 	channel *crypto.Channel
@@ -61,16 +68,28 @@ type Conn struct {
 	cancel context.CancelFunc // cancels background goroutines
 }
 
-func newConn(stream io.ReadWriteCloser, dg datagrammer, closer io.Closer, instanceID string) *Conn {
+func newConn(stream io.ReadWriteCloser, dg datagrammer, closer io.Closer, opener streamOpener, instanceID string) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Conn{
 		instanceID: instanceID,
 		stream:     stream,
 		dg:         dg,
 		closer:     closer,
+		opener:     opener,
 		ctx:        ctx,
 		cancel:     cancel,
 	}
+}
+
+// OpenStream opens a new bidirectional stream on the underlying QUIC
+// connection or WebTransport session. The returned stream implements
+// io.ReadWriteCloser; use writeMessage/readMessage for length-prefixed framing.
+//
+// NOTE: The relay server currently bridges only the primary stream.
+// Additional streams opened via OpenStream are not forwarded to the peer.
+// TODO: Add multi-stream relay support in session.go (bridgeClient).
+func (c *Conn) OpenStream() (io.ReadWriteCloser, error) {
+	return c.opener.OpenStream()
 }
 
 // InstanceID returns the relay-assigned instance ID.
