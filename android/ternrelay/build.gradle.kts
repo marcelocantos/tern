@@ -20,6 +20,7 @@ kotlin {
 dependencies {
     implementation(project(":terncrypto"))
     testImplementation(kotlin("test"))
+    testImplementation("tech.kwik:kwik:0.10.8")
 }
 
 tasks.test {

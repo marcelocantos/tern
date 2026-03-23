@@ -1,4 +1,5 @@
 /tern
+/tern-test-binary
 *.test
 .DS_Store
 sqlite_mcp_server.db
@@ -13,6 +14,7 @@ web/dist/
 # Gradle/Android build artifacts
 android/.gradle/
 android/terncrypto/build/
+android/ternrelay/build/
 android/build/
 
 # TLC model checker artifacts
