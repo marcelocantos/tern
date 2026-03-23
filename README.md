@@ -194,13 +194,16 @@ are included).
 
 | Flag / Env var | Default | Description |
 |----------------|---------|-------------|
-| `--port` / `PORT` | `443` | Listening port (UDP) |
-| `--cert` | — | TLS certificate file (PEM); generates self-signed if omitted |
-| `--key` | — | TLS private key file (PEM) |
+| `--port` / `PORT` | `443` | Listening port (UDP + TCP) |
+| `--domain` | — | Domain for automatic Let's Encrypt TLS (e.g. `tern.fly.dev`) |
+| `--acme-email` | — | Email for Let's Encrypt account |
+| `--cert` | — | TLS certificate file (PEM); if `--domain` is not set |
+| `--key` | — | TLS private key file (PEM); used with `--cert` |
+| `TERN_TOKEN` | — | Bearer token required for `/register`; open if unset |
 | `--version` | — | Print version and exit |
 | `--help-agent` | — | Print usage + agent guide |
 
-Build-time version injection: `go build -ldflags "-X main.version=v1.0.0" .`
+Build-time version injection: `go build -ldflags "-X main.version=v1.0.0" ./cmd/tern`
 
 Max message frame size: 1 MiB (constant `maxWTMessageSize`).
 

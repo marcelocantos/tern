@@ -245,9 +245,6 @@ Needs Review — names depend on pairing.yaml actor names.*
   Swift classes `AppMachine` and `CLIMachine` are fine for the reference
   application but may not suit other applications. Consider making actor names configurable, or
   documenting that consumers should define their own protocol YAML.
-- **No confirmation code function in Swift** — `DeriveConfirmationCode` exists
-  in Go but not in `TernCrypto`. iOS apps currently rely on the backend for
-  code display.
 - **`protocol.ExportGo` output format** is not yet documented as stable; the
   generated code structure may change if the generator is improved.
 - **No published Go module docs** until the first tag is pushed (pkg.go.dev

@@ -31,7 +31,8 @@ const (
 // In encrypted mode (after SetChannel), Send/Recv automatically encrypt
 // and decrypt using the configured crypto.Channel.
 type Conn struct {
-	mu         sync.Mutex
+	mu      sync.Mutex
+	writeMu sync.Mutex // serialises writes to the primary stream
 	instanceID string
 
 	session *webtransport.Session
@@ -83,6 +84,8 @@ func (c *Conn) SetDatagramChannel(ch *crypto.Channel) {
 // data is sent as-is with length-prefix framing. In encrypted mode, data
 // is treated as plaintext and encrypted before sending.
 //
+// Send is safe for concurrent use from multiple goroutines.
+//
 // If ctx carries a deadline, it is applied to the underlying stream write
 // via SetWriteDeadline. Cancellation without a deadline is not supported
 // (the underlying stream write is not interruptible).
@@ -103,6 +106,11 @@ func (c *Conn) Send(ctx context.Context, data []byte) error {
 		copy(framed[1:], data)
 		payload = ch.Encrypt(framed)
 	}
+
+	// Serialise writes: writeWTMessage performs two Write calls
+	// (length header + payload) which must not interleave.
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	return writeWTMessage(c.stream, payload)
 }
 
