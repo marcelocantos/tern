@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"math/big"
 	"net"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -267,6 +268,137 @@ func TestEncryptedDatagramRoundTrip(t *testing.T) {
 	}
 	if string(data) != "encrypted-dgram" {
 		t.Fatalf("got %q, want %q", data, "encrypted-dgram")
+	}
+}
+
+// --- Live tests against tern.fly.dev ---
+// Require TERN_TOKEN env var. Skipped otherwise.
+
+func TestLiveStreamRoundTrip(t *testing.T) {
+	token := os.Getenv("TERN_TOKEN")
+	if token == "" {
+		t.Skip("TERN_TOKEN not set; skipping live test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, err := Register(ctx, "https://tern.fly.dev", WithToken(token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.CloseNow()
+	t.Logf("registered as %s", b.InstanceID())
+
+	c, err := Connect(ctx, "https://tern.fly.dev", b.InstanceID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	// Client → backend.
+	if err := c.Send(ctx, []byte("live-hello")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := b.Recv(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "live-hello" {
+		t.Fatalf("got %q, want live-hello", data)
+	}
+
+	// Backend → client.
+	if err := b.Send(ctx, []byte("live-reply")); err != nil {
+		t.Fatal(err)
+	}
+	data, err = c.Recv(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "live-reply" {
+		t.Fatalf("got %q, want live-reply", data)
+	}
+}
+
+func TestLiveEncryptedRoundTrip(t *testing.T) {
+	token := os.Getenv("TERN_TOKEN")
+	if token == "" {
+		t.Skip("TERN_TOKEN not set; skipping live test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, err := Register(ctx, "https://tern.fly.dev", WithToken(token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.CloseNow()
+
+	c, err := Connect(ctx, "https://tern.fly.dev", b.InstanceID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	// Set up E2E encryption.
+	bKP, _ := crypto.GenerateKeyPair()
+	cKP, _ := crypto.GenerateKeyPair()
+
+	bSendKey, _ := crypto.DeriveSessionKey(bKP.Private, cKP.Public, []byte("b-to-c"))
+	bRecvKey, _ := crypto.DeriveSessionKey(bKP.Private, cKP.Public, []byte("c-to-b"))
+	cSendKey, _ := crypto.DeriveSessionKey(cKP.Private, bKP.Public, []byte("c-to-b"))
+	cRecvKey, _ := crypto.DeriveSessionKey(cKP.Private, bKP.Public, []byte("b-to-c"))
+
+	bCh, _ := crypto.NewChannel(bSendKey, bRecvKey)
+	cCh, _ := crypto.NewChannel(cSendKey, cRecvKey)
+
+	b.SetChannel(bCh)
+	c.SetChannel(cCh)
+
+	if err := c.Send(ctx, []byte("live-encrypted")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := b.Recv(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "live-encrypted" {
+		t.Fatalf("got %q, want live-encrypted", data)
+	}
+}
+
+func TestLiveDatagramRoundTrip(t *testing.T) {
+	token := os.Getenv("TERN_TOKEN")
+	if token == "" {
+		t.Skip("TERN_TOKEN not set; skipping live test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, err := Register(ctx, "https://tern.fly.dev", WithToken(token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.CloseNow()
+
+	c, err := Connect(ctx, "https://tern.fly.dev", b.InstanceID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	if err := c.SendDatagram([]byte("live-dgram")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := b.RecvDatagram(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "live-dgram" {
+		t.Fatalf("got %q, want live-dgram", data)
 	}
 }
 
