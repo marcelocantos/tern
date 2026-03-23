@@ -6,6 +6,10 @@
 // with a known instance ID. Both return a Conn for bidirectional
 // message exchange.
 //
+// After establishing an encrypted channel (via crypto.Channel), call
+// Conn.SetChannel to enable automatic encryption, LAN discovery, and
+// transparent transport upgrade.
+//
 // Sub-packages provide E2E encryption (crypto/), protocol state machines
 // (protocol/), and QR code rendering (qr/).
 package tern
@@ -21,13 +25,6 @@ import (
 
 //go:embed agents-guide.md
 var AgentGuide string
-
-// Conn wraps a WebSocket connection to the relay. It provides
-// send/receive for both backend and client sides.
-type Conn struct {
-	ws         *websocket.Conn
-	instanceID string // set for backend connections
-}
 
 // Option configures a relay connection.
 type Option func(*options)
@@ -88,7 +85,7 @@ func Register(ctx context.Context, relayURL string, opts ...Option) (*Conn, erro
 		return nil, fmt.Errorf("read instance ID: %w", err)
 	}
 
-	return &Conn{ws: ws, instanceID: string(idBytes)}, nil
+	return newConn(ws, string(idBytes), relayURL), nil
 }
 
 // Connect connects to a relay as a client, targeting a specific
@@ -102,35 +99,5 @@ func Connect(ctx context.Context, relayURL, instanceID string, opts ...Option) (
 		return nil, fmt.Errorf("connect to %s: %w", instanceID, err)
 	}
 
-	return &Conn{ws: ws, instanceID: instanceID}, nil
-}
-
-// InstanceID returns the relay-assigned instance ID.
-func (c *Conn) InstanceID() string {
-	return c.instanceID
-}
-
-// Send writes a message to the relay.
-func (c *Conn) Send(ctx context.Context, mt websocket.MessageType, data []byte) error {
-	return c.ws.Write(ctx, mt, data)
-}
-
-// Recv reads a message from the relay.
-func (c *Conn) Recv(ctx context.Context) (websocket.MessageType, []byte, error) {
-	return c.ws.Read(ctx)
-}
-
-// Close gracefully closes the relay connection.
-func (c *Conn) Close() error {
-	return c.ws.Close(websocket.StatusNormalClosure, "")
-}
-
-// CloseNow immediately closes the connection without a close handshake.
-func (c *Conn) CloseNow() error {
-	return c.ws.CloseNow()
-}
-
-// SetReadLimit sets the maximum message size the connection will read.
-func (c *Conn) SetReadLimit(n int64) {
-	c.ws.SetReadLimit(n)
+	return newConn(ws, instanceID, relayURL), nil
 }
