@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -167,10 +168,23 @@ func TestEncryptedModeRoundTrip(t *testing.T) {
 
 func TestLANUpgrade(t *testing.T) {
 	wsBase := startTestRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	runLANUpgradeTest(t, wsBase)
+}
+
+func TestLiveLANUpgrade(t *testing.T) {
+	token := os.Getenv("TERN_TOKEN")
+	if token == "" {
+		t.Skip("TERN_TOKEN not set; skipping live LAN upgrade test")
+	}
+	runLANUpgradeTest(t, "wss://tern.fly.dev", WithToken(token))
+}
+
+func runLANUpgradeTest(t *testing.T, wsBase string, opts ...Option) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	b, err := Register(ctx, wsBase)
+	b, err := Register(ctx, wsBase, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,9 +221,8 @@ func TestLANUpgrade(t *testing.T) {
 	b.SetChannel(bCh)
 	c.SetChannel(cCh)
 
-	// Wait for LAN upgrade to complete. Both sides need to discover
-	// each other's addresses, connect, and cut over.
-	deadline := time.After(5 * time.Second)
+	// Wait for LAN upgrade to complete.
+	deadline := time.After(10 * time.Second)
 	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -224,8 +237,10 @@ func TestLANUpgrade(t *testing.T) {
 		}
 	}
 upgraded:
+	t.Logf("LAN upgrade complete: backend=%q, client=%q",
+		b.PreferredTransport(), c.PreferredTransport())
 
-	// Now send messages — they should flow through the LAN transport.
+	// Send messages — they flow through the LAN transport.
 	if err := c.Send(ctx, websocket.MessageBinary, []byte("via LAN")); err != nil {
 		t.Fatal(err)
 	}
