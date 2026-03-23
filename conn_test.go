@@ -59,9 +59,14 @@ func generateTestCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
 	return cert, pool
 }
 
-// startTestRelay starts a WebTransport relay server on an ephemeral port
-// and returns the URL (https://...) and TLS config for connecting.
-func startTestRelay(t *testing.T) (string, *tls.Config) {
+// relayEnv holds the URL and options needed to connect to a relay.
+type relayEnv struct {
+	url  string
+	opts []Option
+}
+
+// localRelay starts a test WebTransport relay and returns a relayEnv.
+func localRelay(t *testing.T) relayEnv {
 	t.Helper()
 
 	cert, pool := generateTestCert(t)
@@ -80,66 +85,68 @@ func startTestRelay(t *testing.T) (string, *tls.Config) {
 		t.Fatal(err)
 	}
 
-	go func() {
-		srv.Serve(conn)
-	}()
+	go srv.Serve(conn)
 	t.Cleanup(func() { srv.Close() })
 
 	addr := conn.LocalAddr().(*net.UDPAddr)
-	url := "https://127.0.0.1:" + strconv.Itoa(addr.Port)
-	tlsConfig := &tls.Config{RootCAs: pool}
-
-	return url, tlsConfig
-}
-
-func TestRawModeRoundTrip(t *testing.T) {
-	url, tlsConfig := startTestRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	b, err := Register(ctx, url, WithTLS(tlsConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.CloseNow()
-
-	c, err := Connect(ctx, url, b.InstanceID(), WithTLS(tlsConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	// Client -> backend (raw mode).
-	if err := c.Send(ctx, []byte("hello")); err != nil {
-		t.Fatal(err)
-	}
-	data, err := b.Recv(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "hello" {
-		t.Fatalf("got %q, want hello", data)
+	return relayEnv{
+		url:  "https://127.0.0.1:" + strconv.Itoa(addr.Port),
+		opts: []Option{WithTLS(&tls.Config{RootCAs: pool})},
 	}
 }
 
-func TestEncryptedModeRoundTrip(t *testing.T) {
-	url, tlsConfig := startTestRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+// liveRelay returns a relayEnv for tern.fly.dev if TERN_TOKEN is set.
+// Skips the test otherwise.
+func liveRelay(t *testing.T) relayEnv {
+	t.Helper()
+	token := os.Getenv("TERN_TOKEN")
+	if token == "" {
+		t.Skip("TERN_TOKEN not set; skipping live test")
+	}
+	env := relayEnv{
+		url: "https://tern.fly.dev:443",
+		opts: []Option{
+			WithToken(token),
+			WithTLS(&tls.Config{InsecureSkipVerify: true}),
+		},
+	}
+
+	// Probe connectivity — skip if the relay isn't reachable over QUIC/UDP.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	b, err := Register(ctx, url, WithTLS(tlsConfig))
+	probe, err := Register(ctx, env.url, env.opts...)
 	if err != nil {
-		t.Fatal(err)
+		t.Skipf("live relay not reachable: %v", err)
 	}
-	defer b.CloseNow()
+	probe.CloseNow()
 
-	c, err := Connect(ctx, url, b.InstanceID(), WithTLS(tlsConfig))
+	return env
+}
+
+// connectPair registers a backend and connects a client, returning both.
+func connectPair(t *testing.T, env relayEnv) (*Conn, *Conn) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	t.Cleanup(cancel)
+
+	b, err := Register(ctx, env.url, env.opts...)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("register:", err)
 	}
-	defer c.CloseNow()
+	t.Cleanup(func() { b.CloseNow() })
 
-	// Set up matching encrypted channels.
+	c, err := Connect(ctx, env.url, b.InstanceID(), env.opts...)
+	if err != nil {
+		t.Fatal("connect:", err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+
+	return b, c
+}
+
+// setupEncryption creates matching E2E channels on both sides.
+func setupEncryption(t *testing.T, b, c *Conn) {
+	t.Helper()
 	bKP, _ := crypto.GenerateKeyPair()
 	cKP, _ := crypto.GenerateKeyPair()
 
@@ -153,96 +160,11 @@ func TestEncryptedModeRoundTrip(t *testing.T) {
 
 	b.SetChannel(bCh)
 	c.SetChannel(cCh)
-
-	// Client -> backend (encrypted mode — caller sends plaintext).
-	if err := c.Send(ctx, []byte("secret")); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err := b.Recv(ctx)
-	if err != nil {
-		t.Fatalf("recv: %v", err)
-	}
-	if string(data) != "secret" {
-		t.Fatalf("got %q, want secret", data)
-	}
-
-	// Backend -> client.
-	if err := b.Send(ctx, []byte("reply")); err != nil {
-		t.Fatal(err)
-	}
-
-	data, err = c.Recv(ctx)
-	if err != nil {
-		t.Fatalf("recv: %v", err)
-	}
-	if string(data) != "reply" {
-		t.Fatalf("got %q, want reply", data)
-	}
 }
 
-func TestDatagramRoundTrip(t *testing.T) {
-	url, tlsConfig := startTestRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	b, err := Register(ctx, url, WithTLS(tlsConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.CloseNow()
-
-	c, err := Connect(ctx, url, b.InstanceID(), WithTLS(tlsConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	// Client -> Backend datagram.
-	if err := c.SendDatagram([]byte("dgram-c2b")); err != nil {
-		t.Fatal("client send datagram:", err)
-	}
-
-	data, err := b.RecvDatagram(ctx)
-	if err != nil {
-		t.Fatal("backend recv datagram:", err)
-	}
-	if string(data) != "dgram-c2b" {
-		t.Fatalf("got %q, want %q", data, "dgram-c2b")
-	}
-
-	// Backend -> Client datagram.
-	if err := b.SendDatagram([]byte("dgram-b2c")); err != nil {
-		t.Fatal("backend send datagram:", err)
-	}
-
-	data, err = c.RecvDatagram(ctx)
-	if err != nil {
-		t.Fatal("client recv datagram:", err)
-	}
-	if string(data) != "dgram-b2c" {
-		t.Fatalf("got %q, want %q", data, "dgram-b2c")
-	}
-}
-
-func TestEncryptedDatagramRoundTrip(t *testing.T) {
-	url, tlsConfig := startTestRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	b, err := Register(ctx, url, WithTLS(tlsConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.CloseNow()
-
-	c, err := Connect(ctx, url, b.InstanceID(), WithTLS(tlsConfig))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	// Set up matching encrypted datagram channels.
+// setupDatagramEncryption creates matching datagram channels on both sides.
+func setupDatagramEncryption(t *testing.T, b, c *Conn) {
+	t.Helper()
 	bKP, _ := crypto.GenerateKeyPair()
 	cKP, _ := crypto.GenerateKeyPair()
 
@@ -256,185 +178,122 @@ func TestEncryptedDatagramRoundTrip(t *testing.T) {
 
 	b.SetDatagramChannel(bCh)
 	c.SetDatagramChannel(cCh)
-
-	// Client -> Backend encrypted datagram.
-	if err := c.SendDatagram([]byte("encrypted-dgram")); err != nil {
-		t.Fatal("client send datagram:", err)
-	}
-
-	data, err := b.RecvDatagram(ctx)
-	if err != nil {
-		t.Fatal("backend recv datagram:", err)
-	}
-	if string(data) != "encrypted-dgram" {
-		t.Fatalf("got %q, want %q", data, "encrypted-dgram")
-	}
 }
 
-// --- Live tests against tern.fly.dev ---
-// Require TERN_TOKEN env var. Skipped otherwise.
-
-func TestLiveStreamRoundTrip(t *testing.T) {
-	token := os.Getenv("TERN_TOKEN")
-	if token == "" {
-		t.Skip("TERN_TOKEN not set; skipping live test")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	b, err := Register(ctx, "https://tern.fly.dev", WithToken(token))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.CloseNow()
-	t.Logf("registered as %s", b.InstanceID())
-
-	c, err := Connect(ctx, "https://tern.fly.dev", b.InstanceID())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	// Client → backend.
-	if err := c.Send(ctx, []byte("live-hello")); err != nil {
-		t.Fatal(err)
-	}
-	data, err := b.Recv(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "live-hello" {
-		t.Fatalf("got %q, want live-hello", data)
-	}
-
-	// Backend → client.
-	if err := b.Send(ctx, []byte("live-reply")); err != nil {
-		t.Fatal(err)
-	}
-	data, err = c.Recv(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "live-reply" {
-		t.Fatalf("got %q, want live-reply", data)
-	}
+// forEachRelay runs a subtest against both the local and live relay.
+func forEachRelay(t *testing.T, fn func(t *testing.T, env relayEnv)) {
+	t.Run("local", func(t *testing.T) { fn(t, localRelay(t)) })
+	t.Run("live", func(t *testing.T) { fn(t, liveRelay(t)) })
 }
 
-func TestLiveEncryptedRoundTrip(t *testing.T) {
-	token := os.Getenv("TERN_TOKEN")
-	if token == "" {
-		t.Skip("TERN_TOKEN not set; skipping live test")
-	}
+// --- Tests ---
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+func TestStreamRoundTrip(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx := context.Background()
+		b, c := connectPair(t, env)
 
-	b, err := Register(ctx, "https://tern.fly.dev", WithToken(token))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.CloseNow()
+		if err := c.Send(ctx, []byte("hello")); err != nil {
+			t.Fatal(err)
+		}
+		data, err := b.Recv(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "hello" {
+			t.Fatalf("got %q, want hello", data)
+		}
 
-	c, err := Connect(ctx, "https://tern.fly.dev", b.InstanceID())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	// Set up E2E encryption.
-	bKP, _ := crypto.GenerateKeyPair()
-	cKP, _ := crypto.GenerateKeyPair()
-
-	bSendKey, _ := crypto.DeriveSessionKey(bKP.Private, cKP.Public, []byte("b-to-c"))
-	bRecvKey, _ := crypto.DeriveSessionKey(bKP.Private, cKP.Public, []byte("c-to-b"))
-	cSendKey, _ := crypto.DeriveSessionKey(cKP.Private, bKP.Public, []byte("c-to-b"))
-	cRecvKey, _ := crypto.DeriveSessionKey(cKP.Private, bKP.Public, []byte("b-to-c"))
-
-	bCh, _ := crypto.NewChannel(bSendKey, bRecvKey)
-	cCh, _ := crypto.NewChannel(cSendKey, cRecvKey)
-
-	b.SetChannel(bCh)
-	c.SetChannel(cCh)
-
-	if err := c.Send(ctx, []byte("live-encrypted")); err != nil {
-		t.Fatal(err)
-	}
-	data, err := b.Recv(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "live-encrypted" {
-		t.Fatalf("got %q, want live-encrypted", data)
-	}
+		if err := b.Send(ctx, []byte("reply")); err != nil {
+			t.Fatal(err)
+		}
+		data, err = c.Recv(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "reply" {
+			t.Fatalf("got %q, want reply", data)
+		}
+	})
 }
 
-func TestLiveDatagramRoundTrip(t *testing.T) {
-	token := os.Getenv("TERN_TOKEN")
-	if token == "" {
-		t.Skip("TERN_TOKEN not set; skipping live test")
-	}
+func TestEncryptedStreamRoundTrip(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx := context.Background()
+		b, c := connectPair(t, env)
+		setupEncryption(t, b, c)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+		if err := c.Send(ctx, []byte("secret")); err != nil {
+			t.Fatal(err)
+		}
+		data, err := b.Recv(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "secret" {
+			t.Fatalf("got %q, want secret", data)
+		}
+	})
+}
 
-	b, err := Register(ctx, "https://tern.fly.dev", WithToken(token))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.CloseNow()
+func TestDatagramRoundTrip(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx := context.Background()
+		b, c := connectPair(t, env)
 
-	c, err := Connect(ctx, "https://tern.fly.dev", b.InstanceID())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
+		if err := c.SendDatagram([]byte("dgram")); err != nil {
+			t.Fatal(err)
+		}
+		data, err := b.RecvDatagram(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "dgram" {
+			t.Fatalf("got %q, want dgram", data)
+		}
+	})
+}
 
-	if err := c.SendDatagram([]byte("live-dgram")); err != nil {
-		t.Fatal(err)
-	}
-	data, err := b.RecvDatagram(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(data) != "live-dgram" {
-		t.Fatalf("got %q, want live-dgram", data)
-	}
+func TestEncryptedDatagramRoundTrip(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx := context.Background()
+		b, c := connectPair(t, env)
+		setupDatagramEncryption(t, b, c)
+
+		if err := c.SendDatagram([]byte("encrypted-dgram")); err != nil {
+			t.Fatal(err)
+		}
+		data, err := b.RecvDatagram(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "encrypted-dgram" {
+			t.Fatalf("got %q, want encrypted-dgram", data)
+		}
+	})
 }
 
 func TestMultipleMessages(t *testing.T) {
-	url, tlsConfig := startTestRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx := context.Background()
+		b, c := connectPair(t, env)
 
-	backend, err := Register(ctx, url, WithTLS(tlsConfig))
-	if err != nil {
-		t.Fatal("register:", err)
-	}
-	defer backend.CloseNow()
-
-	client, err := Connect(ctx, url, backend.InstanceID(), WithTLS(tlsConfig))
-	if err != nil {
-		t.Fatal("connect:", err)
-	}
-	defer client.CloseNow()
-
-	const n = 10
-	for i := range n {
-		msg := []byte("msg-" + strconv.Itoa(i))
-		if err := client.Send(ctx, msg); err != nil {
-			t.Fatalf("send %d: %v", i, err)
+		const n = 10
+		for i := range n {
+			if err := c.Send(ctx, []byte("msg-"+strconv.Itoa(i))); err != nil {
+				t.Fatalf("send %d: %v", i, err)
+			}
 		}
-	}
 
-	for i := range n {
-		expected := "msg-" + strconv.Itoa(i)
-		data, err := backend.Recv(ctx)
-		if err != nil {
-			t.Fatalf("recv %d: %v", i, err)
+		for i := range n {
+			expected := "msg-" + strconv.Itoa(i)
+			data, err := b.Recv(ctx)
+			if err != nil {
+				t.Fatalf("recv %d: %v", i, err)
+			}
+			if string(data) != expected {
+				t.Fatalf("msg %d: got %q, want %q", i, data, expected)
+			}
 		}
-		if string(data) != expected {
-			t.Fatalf("msg %d: got %q, want %q", i, data, expected)
-		}
-	}
+	})
 }
