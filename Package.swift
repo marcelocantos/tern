@@ -14,5 +14,10 @@ let package = Package(
         .target(name: "TernRelay"),
         .testTarget(name: "TernCryptoTests", dependencies: ["TernCrypto"]),
         .testTarget(name: "TernRelayTests", dependencies: ["TernRelay", "TernCrypto"]),
+        .executableTarget(
+            name: "tern-e2e-swift",
+            dependencies: ["TernRelay", "TernCrypto"],
+            path: "e2e/swift"
+        ),
     ]
 )
