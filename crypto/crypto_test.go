@@ -5,6 +5,7 @@ package crypto
 
 import (
 	"bytes"
+	"crypto/rand"
 	"testing"
 )
 
@@ -187,6 +188,136 @@ func TestDeriveKeyFromSecret(t *testing.T) {
 	}
 	if bytes.Equal(key1, key3) {
 		t.Fatal("different nonces should produce different keys")
+	}
+}
+
+func newTestChannel(t *testing.T) (*Channel, *Channel) {
+	t.Helper()
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientCh, err := NewSymmetricChannel(secret, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCh, err := NewSymmetricChannel(secret, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return clientCh, serverCh
+}
+
+func newTestDatagramChannel(t *testing.T) (*Channel, *Channel) {
+	t.Helper()
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sendKey, err := hkdfDerive(secret, []byte("client-to-server"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recvKey, err := hkdfDerive(secret, []byte("server-to-client"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientCh, err := NewDatagramChannel(sendKey, recvKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCh, err := NewDatagramChannel(recvKey, sendKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return clientCh, serverCh
+}
+
+func TestDatagramModeAcceptsGaps(t *testing.T) {
+	clientCh, serverCh := newTestDatagramChannel(t)
+
+	// Encrypt seq 0, 1, 2, 3, 4, 5 on the sender side.
+	cts := make([][]byte, 6)
+	for i := range cts {
+		cts[i] = clientCh.Encrypt([]byte("msg"))
+	}
+
+	// Receiver gets seq 0, 1, and 5 — skipping 2, 3, 4.
+	for _, idx := range []int{0, 1, 5} {
+		if _, err := serverCh.Decrypt(cts[idx]); err != nil {
+			t.Fatalf("seq %d: unexpected error: %v", idx, err)
+		}
+	}
+}
+
+func TestDatagramModeRejectsReplay(t *testing.T) {
+	clientCh, serverCh := newTestDatagramChannel(t)
+
+	ct := clientCh.Encrypt([]byte("first"))
+	if _, err := serverCh.Decrypt(ct); err != nil {
+		t.Fatal(err)
+	}
+	// Replay the same packet.
+	if _, err := serverCh.Decrypt(ct); err == nil {
+		t.Fatal("expected replay to be rejected in datagram mode")
+	}
+}
+
+func TestDatagramModeRejectsOldSeq(t *testing.T) {
+	clientCh, serverCh := newTestDatagramChannel(t)
+
+	// Encrypt 6 packets (seq 0..5).
+	cts := make([][]byte, 6)
+	for i := range cts {
+		cts[i] = clientCh.Encrypt([]byte("msg"))
+	}
+
+	// Receive seq=5 first (jump forward).
+	if _, err := serverCh.Decrypt(cts[5]); err != nil {
+		t.Fatal(err)
+	}
+	// Now seq=3 is in the past — must be rejected.
+	if _, err := serverCh.Decrypt(cts[3]); err == nil {
+		t.Fatal("expected old sequence number to be rejected in datagram mode")
+	}
+}
+
+func TestStrictModeRejectsGaps(t *testing.T) {
+	clientCh, serverCh := newTestChannel(t)
+
+	// Encrypt two packets.
+	ct0 := clientCh.Encrypt([]byte("first"))
+	ct1 := clientCh.Encrypt([]byte("second"))
+	_ = ct0
+
+	// Receiver tries to decrypt seq=1 without first receiving seq=0.
+	if _, err := serverCh.Decrypt(ct1); err == nil {
+		t.Fatal("strict mode should reject a gap (missing seq 0)")
+	}
+}
+
+func TestNewDatagramChannel(t *testing.T) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	sendKey, err := hkdfDerive(key, []byte("s2c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recvKey, err := hkdfDerive(key, []byte("c2s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ch, err := NewDatagramChannel(sendKey, recvKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ch.mode != ModeDatagrams {
+		t.Fatal("NewDatagramChannel should create a channel in ModeDatagrams")
 	}
 }
 

@@ -93,6 +93,76 @@ describe("E2EChannel", () => {
     });
   });
 
+  it("datagram mode accepts messages with gaps", async () => {
+    const key = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    const client = await E2EChannel.fromSharedKey(key, false);
+    const server = await E2EChannel.fromSharedKey(key, true);
+    server.mode = "datagrams";
+
+    // Encrypt seq 0..5 on sender.
+    const cts: Uint8Array[] = [];
+    for (let i = 0; i < 6; i++) {
+      cts.push(await client.encrypt(new TextEncoder().encode(`msg${i}`)));
+    }
+
+    // Receiver gets seq 0, 1, 5 (skipping 2, 3, 4).
+    for (const idx of [0, 1, 5]) {
+      const pt = await server.decrypt(cts[idx]);
+      assert.deepEqual(pt, new TextEncoder().encode(`msg${idx}`));
+    }
+  });
+
+  it("datagram mode rejects replay", async () => {
+    const key = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    const client = await E2EChannel.fromSharedKey(key, false);
+    const server = await E2EChannel.fromSharedKey(key, true);
+    server.mode = "datagrams";
+
+    const ct = await client.encrypt(new TextEncoder().encode("hello"));
+    await server.decrypt(ct);
+
+    // Replay same ciphertext — must fail.
+    await assert.rejects(() => server.decrypt(ct), {
+      message: "sequence number replayed or too old",
+    });
+  });
+
+  it("datagram mode rejects old sequence numbers", async () => {
+    const key = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    const client = await E2EChannel.fromSharedKey(key, false);
+    const server = await E2EChannel.fromSharedKey(key, true);
+    server.mode = "datagrams";
+
+    // Encrypt seq 0..5.
+    const cts: Uint8Array[] = [];
+    for (let i = 0; i < 6; i++) {
+      cts.push(await client.encrypt(new TextEncoder().encode(`msg${i}`)));
+    }
+
+    // Receive seq=5 first (jump forward).
+    await server.decrypt(cts[5]);
+
+    // seq=3 is now in the past — must be rejected.
+    await assert.rejects(() => server.decrypt(cts[3]), {
+      message: "sequence number replayed or too old",
+    });
+  });
+
+  it("strict mode rejects gaps", async () => {
+    const key = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    const client = await E2EChannel.fromSharedKey(key, false);
+    const server = await E2EChannel.fromSharedKey(key, true);
+
+    // Encrypt two packets but skip delivering seq=0.
+    await client.encrypt(new TextEncoder().encode("first"));
+    const ct1 = await client.encrypt(new TextEncoder().encode("second"));
+
+    // seq=1 without seq=0 must fail in strict mode.
+    await assert.rejects(() => server.decrypt(ct1), {
+      message: "unexpected sequence number",
+    });
+  });
+
   it("direct key construction", async () => {
     const sendKey = globalThis.crypto.getRandomValues(new Uint8Array(32));
     const recvKey = globalThis.crypto.getRandomValues(new Uint8Array(32));

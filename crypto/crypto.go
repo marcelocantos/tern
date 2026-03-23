@@ -101,6 +101,24 @@ func DeriveConfirmationCode(pubA, pubB *ecdh.PublicKey) (string, error) {
 	return fmt.Sprintf("%06d", code), nil
 }
 
+// ChannelMode controls how Decrypt handles sequence numbers.
+type ChannelMode int
+
+const (
+	// ModeStrict (default) requires sequence numbers to be strictly
+	// monotonic with no gaps. Any out-of-order or replayed packet is
+	// rejected. Suitable for reliable transports (TCP/WebSocket).
+	ModeStrict ChannelMode = iota
+
+	// ModeDatagrams allows gaps in the sequence number space, which
+	// is expected on lossy transports (UDP, H.264 video streams).
+	// Any packet with a sequence number greater than the last received
+	// is accepted and the counter jumps forward. Packets with a
+	// sequence number less than or equal to the last received are
+	// rejected to prevent replay attacks.
+	ModeDatagrams
+)
+
 // Channel provides symmetric encryption/decryption for a WebSocket
 // connection. Uses AES-256-GCM with a monotonic counter nonce to
 // prevent nonce reuse.
@@ -110,6 +128,7 @@ type Channel struct {
 	sendSeq atomic.Uint64
 	recvSeq uint64
 	recvMu  sync.Mutex
+	mode    ChannelMode
 }
 
 // NewChannel creates an encrypted channel from a shared key.
@@ -135,6 +154,27 @@ func NewChannel(sendKey, recvKey []byte) (*Channel, error) {
 	}
 
 	return &Channel{sendGCM: sendGCM, recvGCM: recvGCM}, nil
+}
+
+// NewDatagramChannel creates a channel in ModeDatagrams. It is a
+// convenience wrapper around NewChannel for lossy transports such as
+// UDP or H.264 video streams.
+func NewDatagramChannel(sendKey, recvKey []byte) (*Channel, error) {
+	ch, err := NewChannel(sendKey, recvKey)
+	if err != nil {
+		return nil, err
+	}
+	ch.mode = ModeDatagrams
+	return ch, nil
+}
+
+// SetMode changes the sequence-number checking behaviour of Decrypt.
+// It is safe to call before any Decrypt calls; calling it concurrently
+// with Decrypt is not supported.
+func (c *Channel) SetMode(mode ChannelMode) {
+	c.recvMu.Lock()
+	defer c.recvMu.Unlock()
+	c.mode = mode
 }
 
 // NewSymmetricChannel creates a channel where both directions use the
@@ -184,10 +224,22 @@ func (c *Channel) Decrypt(data []byte) ([]byte, error) {
 	c.recvMu.Lock()
 	defer c.recvMu.Unlock()
 
-	if seq != c.recvSeq {
-		return nil, errors.New("unexpected sequence number")
+	switch c.mode {
+	case ModeStrict:
+		if seq != c.recvSeq {
+			return nil, errors.New("unexpected sequence number")
+		}
+		c.recvSeq++
+	case ModeDatagrams:
+		// c.recvSeq holds the highest accepted seq + 1 (or 0 if none yet).
+		// Accept any seq >= c.recvSeq (gaps allowed); reject seq < c.recvSeq
+		// (replay protection — we have already received something at or after
+		// this position).
+		if seq < c.recvSeq {
+			return nil, errors.New("sequence number replayed or too old")
+		}
+		c.recvSeq = seq + 1
 	}
-	c.recvSeq++
 
 	nonce := makeNonce(c.recvGCM.NonceSize(), seq)
 	return c.recvGCM.Open(nil, nonce, ciphertext, seqBytes)

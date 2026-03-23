@@ -112,6 +112,18 @@ export class E2EKeyPair {
 }
 
 /**
+ * Controls how `E2EChannel.decrypt` handles sequence numbers.
+ *
+ * - `"strict"` (default): sequence numbers must be contiguous with no gaps.
+ *   Any out-of-order or replayed packet is rejected. Suitable for reliable
+ *   transports (TCP / WebSocket).
+ * - `"datagrams"`: gaps in the sequence number space are accepted, as expected
+ *   on lossy transports (UDP, H.264 video). Packets with a sequence number
+ *   less than the last accepted one are rejected to prevent replay attacks.
+ */
+export type ChannelMode = "strict" | "datagrams";
+
+/**
  * AES-256-GCM symmetric encryption channel with counter nonce.
  *
  * Wire format matches Go/Swift/Kotlin implementations:
@@ -124,6 +136,8 @@ export class E2EChannel {
   private recvKey: CryptoKey;
   private sendSeq: bigint = 0n;
   private recvSeq: bigint = 0n;
+  /** The sequence-number checking mode used by `decrypt`. Defaults to `"strict"`. */
+  public mode: ChannelMode = "strict";
 
   private constructor(sendKey: CryptoKey, recvKey: CryptoKey) {
     this.sendKey = sendKey;
@@ -195,7 +209,7 @@ export class E2EChannel {
     return result;
   }
 
-  /** Decrypt data. Verifies sequence number to prevent replay attacks. */
+  /** Decrypt data. Verifies the sequence number according to `mode`. */
   async decrypt(data: Uint8Array): Promise<Uint8Array> {
     if (data.length < 8) {
       throw new Error("ciphertext too short");
@@ -208,10 +222,19 @@ export class E2EChannel {
     ).getBigUint64(0, true);
     const ciphertext = data.slice(8);
 
-    if (seq !== this.recvSeq) {
-      throw new Error("unexpected sequence number");
+    if (this.mode === "strict") {
+      if (seq !== this.recvSeq) {
+        throw new Error("unexpected sequence number");
+      }
+      this.recvSeq++;
+    } else {
+      // datagrams: recvSeq holds highest-accepted-seq + 1 (0n if none yet).
+      // Accept seq >= recvSeq (gaps allowed); reject seq < recvSeq (replay).
+      if (seq < this.recvSeq) {
+        throw new Error("sequence number replayed or too old");
+      }
+      this.recvSeq = seq + 1n;
     }
-    this.recvSeq++;
 
     const nonce = new Uint8Array(12);
     nonce.set(seqBytes, 0);

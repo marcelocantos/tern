@@ -49,6 +49,21 @@ public func deriveKeyFromSecret(_ secret: Data, info: Data) -> SymmetricKey {
     )
 }
 
+// MARK: - Channel mode
+
+/// Controls how `E2EChannel.decrypt` handles sequence numbers.
+public enum ChannelMode {
+    /// Strict (default): sequence numbers must be contiguous with no gaps.
+    /// Any out-of-order or replayed packet is rejected. Suitable for reliable
+    /// transports (TCP / WebSocket).
+    case strict
+
+    /// Datagrams: gaps in the sequence number space are accepted, as expected
+    /// on lossy transports (UDP, H.264 video). Packets with a sequence number
+    /// less than the last accepted one are rejected to prevent replay attacks.
+    case datagrams
+}
+
 // MARK: - Encrypted channel
 
 /// Provides symmetric encryption/decryption for a WebSocket connection.
@@ -59,6 +74,10 @@ public final class E2EChannel: @unchecked Sendable {
     private var sendSeq: UInt64 = 0
     private var recvSeq: UInt64 = 0
     private let lock = NSLock()
+
+    /// The sequence-number checking mode used by `decrypt`.
+    /// Defaults to `.strict`. Set before the first `decrypt` call.
+    public var mode: ChannelMode = .strict
 
     /// Create a channel with separate send/recv keys.
     public init(sendKey: SymmetricKey, recvKey: SymmetricKey) {
@@ -100,7 +119,7 @@ public final class E2EChannel: @unchecked Sendable {
         return seqBytes + sealed.ciphertext + sealed.tag
     }
 
-    /// Decrypt a ciphertext message. Verifies sequence number.
+    /// Decrypt a ciphertext message. Verifies the sequence number according to `mode`.
     public func decrypt(_ data: Data) throws -> Data {
         guard data.count >= 8 + 16 else { // 8 seq + 16 tag minimum
             throw E2EError.ciphertextTooShort
@@ -111,11 +130,22 @@ public final class E2EChannel: @unchecked Sendable {
         let payload = data.dropFirst(8)
 
         lock.lock()
-        guard seq == recvSeq else {
-            lock.unlock()
-            throw E2EError.unexpectedSequence
+        switch mode {
+        case .strict:
+            guard seq == recvSeq else {
+                lock.unlock()
+                throw E2EError.unexpectedSequence
+            }
+            recvSeq += 1
+        case .datagrams:
+            // recvSeq holds highest-accepted-seq + 1 (0 if none yet).
+            // Accept seq >= recvSeq (gaps allowed); reject seq < recvSeq (replay).
+            guard seq >= recvSeq else {
+                lock.unlock()
+                throw E2EError.sequenceReplayed
+            }
+            recvSeq = seq + 1
         }
-        recvSeq += 1
         lock.unlock()
 
         let tagStart = payload.count - 16
@@ -143,11 +173,13 @@ public final class E2EChannel: @unchecked Sendable {
     public enum E2EError: LocalizedError {
         case ciphertextTooShort
         case unexpectedSequence
+        case sequenceReplayed
 
         public var errorDescription: String? {
             switch self {
             case .ciphertextTooShort: "Ciphertext too short"
             case .unexpectedSequence: "Unexpected sequence number"
+            case .sequenceReplayed: "Sequence number replayed or too old"
             }
         }
     }

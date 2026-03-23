@@ -65,6 +65,27 @@ class E2EKeyPair {
 fun deriveKeyFromSecret(secret: ByteArray, info: ByteArray): ByteArray =
     Hkdf.derive(secret, info)
 
+// ---- Channel mode ----
+
+/**
+ * Controls how [E2EChannel.decrypt] handles sequence numbers.
+ */
+enum class ChannelMode {
+    /**
+     * Strict (default): sequence numbers must be contiguous with no gaps.
+     * Any out-of-order or replayed packet is rejected. Suitable for reliable
+     * transports (TCP / WebSocket).
+     */
+    STRICT,
+
+    /**
+     * Datagrams: gaps in the sequence number space are accepted, as expected
+     * on lossy transports (UDP, H.264 video). Packets with a sequence number
+     * less than the last accepted one are rejected to prevent replay attacks.
+     */
+    DATAGRAMS,
+}
+
 // ---- Encrypted channel ----
 
 /**
@@ -78,6 +99,13 @@ class E2EChannel private constructor(
     private var sendSeq: Long = 0
     private var recvSeq: Long = 0
     private val lock = Any()
+
+    /**
+     * The sequence-number checking mode used by [decrypt].
+     * Defaults to [ChannelMode.STRICT]. Set before the first [decrypt] call.
+     */
+    @Volatile
+    var mode: ChannelMode = ChannelMode.STRICT
 
     /** Create a channel with separate send/recv keys. */
     constructor(sendKey: ByteArray, recvKey: ByteArray, @Suppress("UNUSED_PARAMETER") marker: Unit = Unit)
@@ -112,9 +140,9 @@ class E2EChannel private constructor(
     }
 
     /**
-     * Decrypt a ciphertext message. Verifies sequence number.
+     * Decrypt a ciphertext message. Verifies the sequence number according to [mode].
      *
-     * @throws E2EException if the ciphertext is too short or sequence is wrong
+     * @throws E2EException if the ciphertext is too short or the sequence check fails
      */
     fun decrypt(data: ByteArray): ByteArray {
         if (data.size < 8 + 16) throw E2EException("Ciphertext too short")
@@ -124,8 +152,19 @@ class E2EChannel private constructor(
         val payload = data.copyOfRange(8, data.size)
 
         synchronized(lock) {
-            if (seq != recvSeq) throw E2EException("Unexpected sequence number")
-            recvSeq++
+            when (mode) {
+                ChannelMode.STRICT -> {
+                    if (seq != recvSeq) throw E2EException("Unexpected sequence number")
+                    recvSeq++
+                }
+                ChannelMode.DATAGRAMS -> {
+                    // recvSeq holds highest-accepted-seq + 1 (0 if none yet).
+                    // Accept seq >= recvSeq (gaps allowed); reject seq < recvSeq (replay).
+                    if (java.lang.Long.compareUnsigned(seq, recvSeq) < 0)
+                        throw E2EException("Sequence number replayed or too old")
+                    recvSeq = seq + 1
+                }
+            }
         }
 
         val nonce = makeNonce(seq)
