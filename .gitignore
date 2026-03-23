@@ -5,6 +5,10 @@ sqlite_mcp_server.db
 .swiftpm/
 .claude/worktrees/
 
+# Node.js
+web/node_modules/
+web/dist/
+
 # Gradle/Android build artifacts
 android/.gradle/
 android/terncrypto/build/
