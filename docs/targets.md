@@ -380,7 +380,7 @@ Server-side abstraction: both WebTransport and raw QUIC sessions
 implement `relaySession`. Hub stores sessions by interface, not
 concrete type. Bridging logic works against the interface.
 
-Status: in progress
+Status: done
 
 ### 🎯T9.2 Raw QUIC server listener
 
@@ -388,7 +388,7 @@ Separate QUIC listener (port 4433) accepting raw QUIC connections
 with ALPN "tern". Handshake: client sends "register" or
 "connect:<id>" on a bidi stream. Routes to shared hub.
 
-Status: in progress
+Status: done
 
 ### 🎯T9.3 Go client uses raw QUIC
 
@@ -396,20 +396,21 @@ Status: in progress
 `io.ReadWriteCloser` + datagrammer interface instead of concrete
 WebTransport types.
 
-Status: in progress
+Status: done
 
 ### 🎯T9.4 Deployment supports both ports
 
 Fly.io exposes both 443 (WebTransport/browsers) and 4433 (raw QUIC/
 native). Dockerfile exposes both. `cmd/tern` starts both servers.
 
-Status: in progress
+Status: done
 
 ### 🎯T9.5 Tests pass against raw QUIC
 
 All existing tests work with raw QUIC client + server path.
+Cross-protocol bridging tested (QUIC backend + WebTransport client).
 
-Status: in progress
+Status: done
 
 ---
 
