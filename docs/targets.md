@@ -40,7 +40,7 @@ Status: done
 
 Jevon's `internal/crypto/`, `internal/protocol/`, `internal/qr/`, and
 `cmd/protogen/` are replaced by imports from tern. iOS app imports
-TernCrypto SPM package.
+the `Tern` SPM package.
 
 Status: not started (requires tern to be tagged and pushed)
 
@@ -435,7 +435,7 @@ Status: not started
 
 ## 🎯T11 Swift relay client (Network.framework QUIC)
 
-Swift `TernRelay` library using Apple's Network.framework for raw QUIC
+Swift relay client (`TernRelay.swift` in the `Tern` package) using Apple's Network.framework for raw QUIC
 connections (ALPN "tern"). Mirrors the Go client's `Register`/`Connect`
 API. Available on iOS 16+ / macOS 13+.
 
