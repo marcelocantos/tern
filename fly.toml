@@ -37,6 +37,11 @@ primary_region = "syd"
   [[services.ports]]
     port = 4433
 
+[mounts]
+  source = "certdata"
+  destination = "/data/certmagic"
+  processes = ["app"]
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"

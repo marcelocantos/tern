@@ -164,6 +164,8 @@ func liveRelay(t *testing.T) relayEnv {
 		opts: []Option{
 			WithToken(token),
 			WithWebTransport(),
+			// Server may use self-signed cert when Let's Encrypt is rate-limited.
+			WithTLS(&tls.Config{InsecureSkipVerify: true}),
 		},
 	}
 
