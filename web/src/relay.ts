@@ -90,6 +90,9 @@ async function readExact(
   return buf;
 }
 
+// TODO(T12): Add setChannel/setDatagramChannel for automatic E2E encryption.
+// Currently callers must encrypt/decrypt manually using E2EChannel.
+
 /**
  * A connection to a peer through the tern WebTransport relay.
  */

@@ -66,13 +66,22 @@ func (h *hub) get(id string) *instance {
 
 // bridgeClient connects a client session to a registered backend instance.
 // It relays messages and datagrams bidirectionally until one side disconnects.
+//
+// Note: a slow consumer can block the producer (backpressure propagates
+// through the relay). This is inherent to the 1:1 relay design. For
+// protection against malicious slow clients, add bounded message buffers
+// with drop-on-overflow.
 func bridgeClient(inst *instance, clientSession relaySession) {
-	ctx := clientSession.Context()
+	ctx, cancel := context.WithCancel(clientSession.Context())
+	defer cancel()
 
-	errCh := make(chan error, 3)
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
 
 	// backend stream -> client stream
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			msg, err := inst.session.ReadMessage()
 			if err != nil {
@@ -87,7 +96,9 @@ func bridgeClient(inst *instance, clientSession relaySession) {
 	}()
 
 	// client stream -> backend stream
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			msg, err := clientSession.ReadMessage()
 			if err != nil {
@@ -102,7 +113,9 @@ func bridgeClient(inst *instance, clientSession relaySession) {
 	}()
 
 	// backend datagrams -> client datagrams
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			data, err := inst.session.ReceiveDatagram(ctx)
 			if err != nil {
@@ -115,7 +128,9 @@ func bridgeClient(inst *instance, clientSession relaySession) {
 	}()
 
 	// client datagrams -> backend datagrams
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			data, err := clientSession.ReceiveDatagram(ctx)
 			if err != nil {
@@ -136,4 +151,7 @@ func bridgeClient(inst *instance, clientSession relaySession) {
 	case <-inst.session.Context().Done():
 		slog.Info("backend session ended", "instance", inst.id)
 	}
+
+	cancel() // stop datagram goroutines
+	wg.Wait()
 }

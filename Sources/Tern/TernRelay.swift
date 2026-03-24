@@ -284,25 +284,28 @@ public final class TernConn: @unchecked Sendable {
         return try await readExactly(conn, count: Int(length))
     }
 
-    /// Read exactly `count` bytes from the connection.
+    /// Read exactly `count` bytes from the connection, accumulating chunks
+    /// until the full amount is received.
     private static func readExactly(_ conn: NWConnection, count: Int) async throws -> Data {
-        try await withCheckedThrowingContinuation { cont in
-            conn.receive(minimumIncompleteLength: count, maximumLength: count) { content, _, isComplete, error in
-                if let error = error {
-                    cont.resume(throwing: TernRelayError.recvFailed(error.localizedDescription))
-                } else if let data = content, data.count == count {
-                    cont.resume(returning: data)
-                } else if isComplete {
-                    cont.resume(throwing: TernRelayError.unexpectedEOF)
-                } else if let data = content {
-                    // Network.framework may return fewer bytes than requested.
-                    // We need to accumulate.
-                    cont.resume(returning: data)
-                } else {
-                    cont.resume(throwing: TernRelayError.unexpectedEOF)
+        var buffer = Data()
+        while buffer.count < count {
+            let remaining = count - buffer.count
+            let chunk: Data = try await withCheckedThrowingContinuation { cont in
+                conn.receive(minimumIncompleteLength: 1, maximumLength: remaining) { content, _, isComplete, error in
+                    if let error = error {
+                        cont.resume(throwing: TernRelayError.recvFailed(error.localizedDescription))
+                    } else if let data = content, !data.isEmpty {
+                        cont.resume(returning: data)
+                    } else if isComplete {
+                        cont.resume(throwing: TernRelayError.unexpectedEOF)
+                    } else {
+                        cont.resume(throwing: TernRelayError.unexpectedEOF)
+                    }
                 }
             }
+            buffer.append(chunk)
         }
+        return buffer
     }
 
     /// Start a background receiver for QUIC datagrams.
@@ -408,6 +411,9 @@ internal func decodeLengthPrefix(_ data: Data) -> UInt32 {
         | UInt32(data[data.startIndex + 2]) << 8
         | UInt32(data[data.startIndex + 3])
 }
+
+// TODO(T12): Add setChannel/setDatagramChannel for automatic E2E encryption.
+// Currently callers must encrypt/decrypt manually using E2EChannel.
 
 /// Construct a handshake message for the tern QUIC protocol.
 internal func buildHandshakeMessage(role: String, token: String? = nil, instanceID: String? = nil) -> String {

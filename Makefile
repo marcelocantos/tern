@@ -48,7 +48,7 @@ e2e-swift:
 
 e2e-kotlin:
 	JAVA_HOME=$(JDK21) android/gradlew \
-		-p $(CURDIR)/android :ternrelay:test --no-daemon --console=plain \
+		-p $(CURDIR)/android :tern:test --no-daemon --console=plain \
 		--tests "com.marcelocantos.tern.relay.TernConnE2ETest"
 
 # --- E2E tests against live relay (require TERN_TOKEN) ---

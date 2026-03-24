@@ -39,7 +39,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	tlsConfig := &tls.Config{InsecureSkipVerify: true}
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: os.Getenv("TERN_INSECURE") == "1",
+	}
 
 	var conn *tern.Conn
 	var err error
@@ -78,11 +80,13 @@ func main() {
 
 	defer conn.CloseNow()
 
-	// Bridge: relay → stdout
+	// Bridge: relay → stdout. Exit the process when the relay closes so
+	// the stdin loop doesn't hang indefinitely waiting for more input.
 	go func() {
 		for {
 			data, err := conn.Recv(ctx)
 			if err != nil {
+				os.Exit(0)
 				return
 			}
 			writeStdout(data)
@@ -114,6 +118,9 @@ func readStdin() ([]byte, error) {
 		return nil, err
 	}
 	length := binary.BigEndian.Uint32(hdr[:])
+	if length > 1<<20 {
+		return nil, fmt.Errorf("message too large: %d bytes", length)
+	}
 	buf := make([]byte, length)
 	if _, err := io.ReadFull(os.Stdin, buf); err != nil {
 		return nil, err

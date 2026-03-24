@@ -123,13 +123,6 @@ func (c *Conn) SetDatagramChannel(ch *crypto.Channel) {
 // via SetWriteDeadline. Cancellation without a deadline is not supported
 // (the underlying stream write is not interruptible).
 func (c *Conn) Send(ctx context.Context, data []byte) error {
-	if deadline, ok := ctx.Deadline(); ok {
-		if dl, ok := c.stream.(deadliner); ok {
-			dl.SetWriteDeadline(deadline)
-			defer dl.SetWriteDeadline(time.Time{})
-		}
-	}
-
 	c.mu.Lock()
 	ch := c.channel
 	c.mu.Unlock()
@@ -146,6 +139,14 @@ func (c *Conn) Send(ctx context.Context, data []byte) error {
 	// (length header + payload) which must not interleave.
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if dl, ok := c.stream.(deadliner); ok {
+			dl.SetWriteDeadline(deadline)
+			defer dl.SetWriteDeadline(time.Time{})
+		}
+	}
+
 	return writeMessage(c.stream, payload)
 }
 

@@ -13,8 +13,8 @@
 //	protocol/<name>_gen.go
 //	formal/<Name>.tla
 //	docs/<name>.puml
-//	Sources/TernCrypto/<Name>Machine.swift
-//	android/terncrypto/src/main/kotlin/com/marcelocantos/tern/crypto/<Name>Machine.kt
+//	Sources/Tern/<Name>Machine.swift
+//	android/tern/src/main/kotlin/com/marcelocantos/tern/crypto/<Name>Machine.kt
 //	web/src/<Name>Machine.ts
 package main
 
@@ -80,20 +80,20 @@ func main() {
 			},
 		},
 		{
-			path: filepath.Join("Sources", "TernCrypto", p.Name+"Machine.swift"),
+			path: filepath.Join("Sources", "Tern", p.Name+"Machine.swift"),
 			gen: func() error {
 				return writeFile(
-					filepath.Join("Sources", "TernCrypto", p.Name+"Machine.swift"),
+					filepath.Join("Sources", "Tern", p.Name+"Machine.swift"),
 					func(f *os.File) error { return p.ExportSwift(f) },
 				)
 			},
 		},
 		{
-			path: filepath.Join("android", "terncrypto", "src", "main", "kotlin",
+			path: filepath.Join("android", "tern", "src", "main", "kotlin",
 				"com", "marcelocantos", "tern", "crypto", p.Name+"Machine.kt"),
 			gen: func() error {
 				return writeFile(
-					filepath.Join("android", "terncrypto", "src", "main", "kotlin",
+					filepath.Join("android", "tern", "src", "main", "kotlin",
 						"com", "marcelocantos", "tern", "crypto", p.Name+"Machine.kt"),
 					func(f *os.File) error {
 						return p.ExportKotlin(f, "com.marcelocantos.tern.crypto")
