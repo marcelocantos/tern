@@ -29,3 +29,8 @@ maintenance activities. Append-only — newest entries at the bottom.
   - LAN upgrade re-implementation on QUIC (🎯T5)
   - TLA+ model for cutover protocol (🎯T10)
   - Channel API (streaming + datagram channels)
+
+## 2026-03-24 — /release v0.5.0
+
+- **Commit**: `70b55e6`
+- **Outcome**: Released v0.5.0. Renamed Swift and Kotlin packages from TernCrypto/TernRelay to just Tern (single package per platform). Added convergence targets T12-T17.
