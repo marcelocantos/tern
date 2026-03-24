@@ -18,7 +18,6 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":terncrypto"))
     testImplementation(kotlin("test"))
     testImplementation("tech.kwik:kwik:0.10.8")
 }
@@ -35,7 +34,7 @@ publishing {
         create<MavenPublication>("maven") {
             from(components["java"])
             groupId = "com.marcelocantos.tern"
-            artifactId = "ternrelay"
+            artifactId = "tern"
         }
     }
 }

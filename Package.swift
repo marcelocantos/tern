@@ -6,17 +6,14 @@ let package = Package(
     name: "Tern",
     platforms: [.iOS(.v16), .macOS(.v13)],
     products: [
-        .library(name: "TernCrypto", targets: ["TernCrypto"]),
-        .library(name: "TernRelay", targets: ["TernRelay"]),
+        .library(name: "Tern", targets: ["Tern"]),
     ],
     targets: [
-        .target(name: "TernCrypto"),
-        .target(name: "TernRelay"),
-        .testTarget(name: "TernCryptoTests", dependencies: ["TernCrypto"]),
-        .testTarget(name: "TernRelayTests", dependencies: ["TernRelay", "TernCrypto"]),
+        .target(name: "Tern"),
+        .testTarget(name: "TernTests", dependencies: ["Tern"]),
         .executableTarget(
             name: "tern-e2e-swift",
-            dependencies: ["TernRelay", "TernCrypto"],
+            dependencies: ["Tern"],
             path: "e2e/swift"
         ),
     ]

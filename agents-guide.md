@@ -7,7 +7,7 @@ Tern is a Go + Swift library for opaque authenticated WebTransport relay. It pro
 - A relay server that bridges WebTransport sessions without seeing plaintext
 - E2E encryption (X25519 ECDH + AES-256-GCM) with a pairing ceremony and MitM detection
 - A declarative protocol state machine framework with code generation (Go, Swift, TLA+, PlantUML)
-- A Swift package (`TernCrypto`) for iOS 16+/macOS 13+
+- A Swift package (`Tern`) for iOS 16+/macOS 13+
 
 ## Go Packages
 
@@ -100,7 +100,7 @@ One client per instance. A second client connection returns HTTP 409.
 https://github.com/marcelocantos/tern
 ```
 
-Product: `TernCrypto`. Platforms: iOS 16+, macOS 13+.
+Product: `Tern`. Platforms: iOS 16+, macOS 13+.
 
 ```swift
 let kp = E2EKeyPair()

@@ -14,7 +14,7 @@
 
 import Foundation
 import Network
-import TernCrypto
+import Tern
 
 // MARK: - Config
 

@@ -4,7 +4,7 @@
 #if canImport(Network)
 
 import XCTest
-@testable import TernRelay
+@testable import Tern
 
 final class TernRelayTests: XCTestCase {
 

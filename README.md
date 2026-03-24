@@ -104,9 +104,10 @@ Add the GitHub repo as an SPM dependency:
 https://github.com/marcelocantos/tern
 ```
 
-The package provides the `TernCrypto` library (iOS 16+, macOS 13+)
-containing `E2ECrypto.swift` (key exchange and encrypted channel) and
-the generated `PairingCeremonyMachine.swift`.
+The package provides the `Tern` library (iOS 16+, macOS 13+)
+containing `E2ECrypto.swift` (key exchange and encrypted channel),
+`TernRelay.swift` (relay connectivity), and the generated
+`PairingCeremonyMachine.swift`.
 
 ```swift
 // Both sides exchange public key bytes through the relay.
@@ -133,7 +134,7 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("com.github.marcelocantos.tern:terncrypto:v0.3.0")
+    implementation("com.github.marcelocantos.tern:tern:v0.3.0")
 }
 ```
 

@@ -210,7 +210,7 @@ func LanIP() string
 
 *Stability: Stable.*
 
-### Swift `TernCrypto` package (SPM)
+### Swift `Tern` package (SPM)
 
 ```swift
 // E2EKeyPair

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import XCTest
-@testable import TernCrypto
+@testable import Tern
 
 final class E2ECryptoTests: XCTestCase {
 

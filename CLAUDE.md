@@ -80,17 +80,17 @@ auth requires completed pairing, no nonce reuse.
 
 Run with `./formal/tlc PairingCeremony`.
 
-### Swift Package (`Package.swift`, `Sources/TernCrypto/`)
+### Swift Package (`Package.swift`, `Sources/Tern/`)
 
-SPM library (`TernCrypto`) containing E2ECrypto.swift and the generated
-PairingCeremonyMachine.swift. iOS apps add the GitHub repo as a package
-dependency.
+SPM library (`Tern`) containing E2ECrypto.swift, TernRelay.swift, and the
+generated PairingCeremonyMachine.swift. iOS apps add the GitHub repo as a
+package dependency.
 
-### Android/Kotlin Library (`android/terncrypto/`)
+### Android/Kotlin Library (`android/tern/`)
 
-Kotlin/JVM library mirroring TernCrypto: `E2EKeyPair`, `E2EChannel`,
-`Hkdf`, and the generated `PairingCeremonyMachine.kt`. Consumed via
-JitPack (`com.github.marcelocantos.tern:terncrypto:<tag>`).
+Kotlin/JVM library (`Tern`) containing `E2EKeyPair`, `E2EChannel`,
+`Hkdf`, `TernConn`, and the generated `PairingCeremonyMachine.kt`. Consumed via
+JitPack (`com.github.marcelocantos.tern:tern:<tag>`).
 Requires JDK 17+ / Android API 33+ (for X25519 support).
 
 ## Deployment
