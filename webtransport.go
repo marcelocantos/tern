@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/quic-go/quic-go/http3"
@@ -185,14 +186,23 @@ func (s *WebTransportServer) handleRegister(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Read and discard the handshake message.
-	if _, err := readMessage(stream); err != nil {
+	// Read the handshake message. May contain a requested instance ID:
+	// "register" or "register::INSTANCE_ID"
+	handshake, err := readMessage(stream)
+	if err != nil {
 		slog.Error("register: read handshake failed", "err", err)
 		session.CloseWithError(0, "failed to read handshake")
 		return
 	}
 
-	id := generateID()
+	var id string
+	msg := string(handshake)
+	if strings.HasPrefix(msg, "register::") {
+		id = msg[len("register::"):]
+	}
+	if id == "" {
+		id = generateID()
+	}
 
 	// Send the instance ID to the backend.
 	if err := writeMessage(stream, []byte(id)); err != nil {

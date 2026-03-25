@@ -39,6 +39,7 @@ type Option func(*options)
 
 type options struct {
 	token         string
+	instanceID    string // persistent instance ID (empty = server assigns random)
 	tlsConfig     *tls.Config
 	webTransport  bool
 	quicPort      string // override the QUIC port (default: "4433")
@@ -60,6 +61,14 @@ func WithTLS(tlsConfig *tls.Config) Option {
 // supports WebTransport.
 func WithWebTransport() Option {
 	return func(o *options) { o.webTransport = true }
+}
+
+// WithInstanceID sets a persistent instance ID for registration. If set,
+// the relay uses this ID instead of generating a random one. This enables
+// persistent pairing — clients that know the ID can reconnect across
+// reboots and network changes without re-scanning a QR code.
+func WithInstanceID(id string) Option {
+	return func(o *options) { o.instanceID = id }
 }
 
 // WithQUICPort overrides the default QUIC port (4433) for raw QUIC
@@ -144,10 +153,10 @@ func registerQUIC(ctx context.Context, relayURL string, o options) (*Conn, error
 		return nil, fmt.Errorf("register: open stream: %w", err)
 	}
 
-	// Send handshake: "register" or "register:TOKEN".
+	// Send handshake: "register[:TOKEN[:INSTANCE_ID]]"
 	handshake := "register"
-	if o.token != "" {
-		handshake = "register:" + o.token
+	if o.token != "" || o.instanceID != "" {
+		handshake = "register:" + o.token + ":" + o.instanceID
 	}
 	if err := writeMessage(stream, []byte(handshake)); err != nil {
 		conn.CloseWithError(0, "failed to send handshake")
@@ -240,7 +249,11 @@ func registerWebTransport(ctx context.Context, relayURL string, o options) (*Con
 	}
 
 	// Send a handshake to trigger the stream header.
-	if err := writeMessage(stream, []byte("register")); err != nil {
+	handshake := "register"
+	if o.instanceID != "" {
+		handshake = "register::" + o.instanceID
+	}
+	if err := writeMessage(stream, []byte(handshake)); err != nil {
 		session.CloseWithError(0, "failed to send handshake")
 		return nil, fmt.Errorf("register: handshake: %w", err)
 	}

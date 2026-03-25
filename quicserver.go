@@ -149,20 +149,28 @@ func (s *QUICServer) handleConnection(conn *quic.Conn) {
 }
 
 func (s *QUICServer) handleRegister(conn *quic.Conn, stream *quic.Stream, msg string) {
-	// Parse optional token: "register:TOKEN" or just "register".
-	if s.token != "" {
-		var provided string
-		if strings.HasPrefix(msg, "register:") {
-			provided = msg[len("register:"):]
+	// Parse handshake: "register[:TOKEN[:INSTANCE_ID]]"
+	var token, requestedID string
+	if strings.HasPrefix(msg, "register:") {
+		parts := strings.SplitN(msg[len("register:"):], ":", 2)
+		token = parts[0]
+		if len(parts) > 1 {
+			requestedID = parts[1]
 		}
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) != 1 {
+	}
+
+	if s.token != "" {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(s.token)) != 1 {
 			slog.Warn("quic register: unauthorized")
 			conn.CloseWithError(1, "unauthorized")
 			return
 		}
 	}
 
-	id := generateID()
+	id := requestedID
+	if id == "" {
+		id = generateID()
+	}
 
 	// Send the instance ID back to the backend.
 	if err := writeMessage(stream, []byte(id)); err != nil {

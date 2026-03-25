@@ -438,3 +438,41 @@ func TestMultipleMessages(t *testing.T) {
 		}
 	})
 }
+
+func TestPersistentInstanceID(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	myUUID := "test-device-uuid-12345"
+
+	// Register with a persistent instance ID.
+	b, err := Register(ctx, env.url, append(env.opts, WithInstanceID(myUUID))...)
+	if err != nil {
+		t.Fatal("register:", err)
+	}
+	if b.InstanceID() != myUUID {
+		t.Fatalf("got instance ID %q, want %q", b.InstanceID(), myUUID)
+	}
+
+	// Client connects using the persistent ID.
+	c, err := Connect(ctx, env.url, myUUID, env.opts...)
+	if err != nil {
+		t.Fatal("connect:", err)
+	}
+
+	// Verify messaging works.
+	if err := c.Send(ctx, []byte("persistent")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := b.Recv(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "persistent" {
+		t.Fatalf("got %q, want persistent", data)
+	}
+
+	c.CloseNow()
+	b.CloseNow()
+}
