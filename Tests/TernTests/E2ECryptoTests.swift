@@ -141,6 +141,45 @@ final class E2ECryptoTests: XCTestCase {
         XCTAssertThrowsError(try receiver.decrypt(encrypted[3]))
     }
 
+    func testPairingRecordRoundTrip() throws {
+        // Simulate a pairing: two key pairs, record one side.
+        let serverKP = E2EKeyPair()
+        let clientKP = E2EKeyPair()
+
+        let record = PairingRecord(
+            peerInstanceID: "server-uuid",
+            relayURL: "https://relay.example.com",
+            localKeyPair: clientKP,
+            peerPublicKey: serverKP.publicKeyData
+        )
+
+        // Marshal/unmarshal via JSON.
+        let data = try JSONEncoder().encode(record)
+        let restored = try JSONDecoder().decode(PairingRecord.self, from: data)
+
+        // Derive channel from restored record.
+        let ch = try restored.deriveChannel(
+            sendInfo: Data("c2s".utf8),
+            recvInfo: Data("s2c".utf8)
+        )
+
+        // Derive the same channel from the original keys (server side).
+        let serverSendKey = try serverKP.deriveSessionKey(
+            peerPublicKey: clientKP.publicKeyData,
+            info: Data("s2c".utf8)
+        )
+        let serverRecvKey = try serverKP.deriveSessionKey(
+            peerPublicKey: clientKP.publicKeyData,
+            info: Data("c2s".utf8)
+        )
+        let serverCh = E2EChannel(sendKey: serverSendKey, recvKey: serverRecvKey)
+
+        // Verify they can communicate.
+        let ct = try ch.encrypt(Data("hello from restored record".utf8))
+        let pt = try serverCh.decrypt(ct)
+        XCTAssertEqual(String(data: pt, encoding: .utf8), "hello from restored record")
+    }
+
     func testConfirmationCodeCrossplatformVector() {
         // Fixed X25519 public keys (any 32-byte value works for derivation).
         let keyA = Data(repeating: 0x01, count: 32)

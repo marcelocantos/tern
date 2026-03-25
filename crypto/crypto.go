@@ -16,6 +16,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -249,4 +250,66 @@ func makeNonce(size int, seq uint64) []byte {
 	nonce := make([]byte, size)
 	binary.LittleEndian.PutUint64(nonce, seq)
 	return nonce
+}
+
+// PairingRecord holds the persistent state from a completed pairing
+// ceremony. Serialize this (e.g., JSON) and store it securely. On
+// reconnect, load it and call DeriveChannel() to derive session keys
+// without repeating the ECDH ceremony.
+type PairingRecord struct {
+	PeerInstanceID  string `json:"peer_instance_id"`
+	RelayURL        string `json:"relay_url"`
+	LocalPrivateKey []byte `json:"local_private_key"` // raw X25519, 32 bytes
+	LocalPublicKey  []byte `json:"local_public_key"`  // raw X25519, 32 bytes
+	PeerPublicKey   []byte `json:"peer_public_key"`   // raw X25519, 32 bytes
+}
+
+// NewPairingRecord creates a record from a completed pairing ceremony.
+func NewPairingRecord(peerInstanceID, relayURL string, localKP *KeyPair, peerPubKey *ecdh.PublicKey) *PairingRecord {
+	return &PairingRecord{
+		PeerInstanceID:  peerInstanceID,
+		RelayURL:        relayURL,
+		LocalPrivateKey: localKP.Private.Bytes(),
+		LocalPublicKey:  localKP.Public.Bytes(),
+		PeerPublicKey:   peerPubKey.Bytes(),
+	}
+}
+
+// DeriveChannel derives an encrypted channel from the stored keys.
+// The info parameters should match what was used during the original pairing
+// (e.g., "server-to-client" and "client-to-server").
+func (r *PairingRecord) DeriveChannel(sendInfo, recvInfo []byte) (*Channel, error) {
+	priv, err := ecdh.X25519().NewPrivateKey(r.LocalPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("parse local key: %w", err)
+	}
+	peerPub, err := ecdh.X25519().NewPublicKey(r.PeerPublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("parse peer key: %w", err)
+	}
+
+	sendKey, err := DeriveSessionKey(priv, peerPub, sendInfo)
+	if err != nil {
+		return nil, fmt.Errorf("derive send key: %w", err)
+	}
+	recvKey, err := DeriveSessionKey(priv, peerPub, recvInfo)
+	if err != nil {
+		return nil, fmt.Errorf("derive recv key: %w", err)
+	}
+
+	return NewChannel(sendKey, recvKey)
+}
+
+// Marshal serializes the record to JSON.
+func (r *PairingRecord) Marshal() ([]byte, error) {
+	return json.Marshal(r)
+}
+
+// UnmarshalPairingRecord deserializes a record from JSON.
+func UnmarshalPairingRecord(data []byte) (*PairingRecord, error) {
+	var r PairingRecord
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
 }

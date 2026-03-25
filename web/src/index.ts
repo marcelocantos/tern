@@ -8,5 +8,8 @@ export {
   deriveConfirmationCode,
   generateNonce,
   generateSecret,
+  createPairingRecord,
+  deriveChannelFromRecord,
+  type PairingRecord,
 } from "./crypto.js";
 export { register, connect, Conn, type ConnectOptions } from "./relay.js";

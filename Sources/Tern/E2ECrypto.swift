@@ -82,6 +82,43 @@ public func deriveConfirmationCode(_ pubA: Data, _ pubB: Data) -> String {
     return String(format: "%06d", code)
 }
 
+// MARK: - Pairing record
+
+/// Persistent state from a completed pairing ceremony.
+/// Serialize to JSON (Codable) and store in Keychain or secure storage.
+/// On reconnect, load it and call `deriveChannel` to derive session keys
+/// without repeating the ECDH ceremony.
+public struct PairingRecord: Codable, Sendable {
+    public let peerInstanceID: String
+    public let relayURL: String
+    public let localPrivateKey: Data  // raw X25519, 32 bytes
+    public let localPublicKey: Data   // raw X25519, 32 bytes
+    public let peerPublicKey: Data    // raw X25519, 32 bytes
+
+    public init(peerInstanceID: String, relayURL: String, localKeyPair: E2EKeyPair, peerPublicKey: Data) {
+        self.peerInstanceID = peerInstanceID
+        self.relayURL = relayURL
+        self.localPrivateKey = Data(localKeyPair.privateKey.rawRepresentation)
+        self.localPublicKey = localKeyPair.publicKeyData
+        self.peerPublicKey = peerPublicKey
+    }
+
+    /// Derive an encrypted channel from the stored keys.
+    /// The info parameters should match what was used during the original pairing.
+    public func deriveChannel(sendInfo: Data, recvInfo: Data) throws -> E2EChannel {
+        let privateKey = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: localPrivateKey)
+        let peerKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: peerPublicKey)
+        let shared = try privateKey.sharedSecretFromKeyAgreement(with: peerKey)
+
+        let sendKey = shared.hkdfDerivedSymmetricKey(
+            using: SHA256.self, salt: Data(), sharedInfo: sendInfo, outputByteCount: 32)
+        let recvKey = shared.hkdfDerivedSymmetricKey(
+            using: SHA256.self, salt: Data(), sharedInfo: recvInfo, outputByteCount: 32)
+
+        return E2EChannel(sendKey: sendKey, recvKey: recvKey)
+    }
+}
+
 // MARK: - Channel mode
 
 /// Controls how `E2EChannel.decrypt` handles sequence numbers.

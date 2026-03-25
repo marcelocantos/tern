@@ -142,6 +142,38 @@ class E2ECryptoTest {
     }
 
     @Test
+    fun `pairing record round trip`() {
+        // Simulate a pairing: two key pairs, record one side.
+        val serverKP = E2EKeyPair()
+        val clientKP = E2EKeyPair()
+
+        val record = PairingRecord(
+            peerInstanceID = "server-uuid",
+            relayURL = "https://relay.example.com",
+            localKeyPair = clientKP,
+            peerPublicKey = serverKP.publicKeyData,
+        )
+
+        // Verify raw key extraction round-trips.
+        assertEquals(32, record.localPrivateKey.size)
+        assertEquals(32, record.localPublicKey.size)
+        assertEquals(32, record.peerPublicKey.size)
+
+        // Derive channel from the record.
+        val ch = record.deriveChannel("c2s".toByteArray(), "s2c".toByteArray())
+
+        // Derive the same channel from the original keys (server side).
+        val serverSendKey = serverKP.deriveSessionKey(clientKP.publicKeyData, "s2c".toByteArray())
+        val serverRecvKey = serverKP.deriveSessionKey(clientKP.publicKeyData, "c2s".toByteArray())
+        val serverCh = E2EChannel(serverSendKey, serverRecvKey)
+
+        // Verify they can communicate.
+        val ct = ch.encrypt("hello from restored record".toByteArray())
+        val pt = serverCh.decrypt(ct)
+        assertContentEquals("hello from restored record".toByteArray(), pt)
+    }
+
+    @Test
     fun `datagram mode accepts messages with gaps`() {
         val sharedKey = ByteArray(32) { it.toByte() }
         val sender = E2EChannel(sharedKey, isServer = false)

@@ -8,6 +8,8 @@ import {
   E2EChannel,
   deriveKeyFromSecret,
   deriveConfirmationCode,
+  createPairingRecord,
+  deriveChannelFromRecord,
 } from "./crypto.js";
 
 describe("E2EKeyPair", () => {
@@ -253,6 +255,49 @@ describe("deriveConfirmationCode", () => {
     const code2 = await deriveConfirmationCode(a.publicKeyData, c.publicKeyData);
     // With 1M possible codes, collision is ~0.0001% — safe to assert inequality
     assert.notEqual(code1, code2);
+  });
+});
+
+describe("PairingRecord", () => {
+  it("round-trips through JSON and derives a working channel", async () => {
+    // Simulate a pairing: two key pairs, record one side.
+    const serverKP = await E2EKeyPair.create();
+    const clientKP = await E2EKeyPair.create();
+
+    const record = await createPairingRecord(
+      "server-uuid",
+      "https://relay.example.com",
+      clientKP,
+      serverKP.publicKeyData,
+    );
+
+    // Marshal/unmarshal via JSON.
+    const json = JSON.stringify(record);
+    const restored = JSON.parse(json);
+
+    // Derive channel from restored record.
+    const enc = new TextEncoder();
+    const ch = await deriveChannelFromRecord(
+      restored,
+      enc.encode("c2s"),
+      enc.encode("s2c"),
+    );
+
+    // Derive the same channel from the original keys (server side).
+    const serverSendKey = await serverKP.deriveSessionKey(
+      clientKP.publicKeyData,
+      enc.encode("s2c"),
+    );
+    const serverRecvKey = await serverKP.deriveSessionKey(
+      clientKP.publicKeyData,
+      enc.encode("c2s"),
+    );
+    const serverCh = await E2EChannel.create(serverSendKey, serverRecvKey);
+
+    // Verify they can communicate.
+    const ct = await ch.encrypt(enc.encode("hello from restored record"));
+    const pt = await serverCh.decrypt(ct);
+    assert.deepEqual(pt, enc.encode("hello from restored record"));
   });
 });
 

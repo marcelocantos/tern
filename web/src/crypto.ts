@@ -91,11 +91,21 @@ export class E2EKeyPair {
 
   /** Generate a new X25519 key pair. */
   static async create(): Promise<E2EKeyPair> {
-    const keyPair = await subtle.generateKey("X25519", false, [
+    const keyPair = await subtle.generateKey("X25519", true, [
       "deriveBits",
     ]) as CryptoKeyPair;
     const rawPub = await subtle.exportKey("raw", keyPair.publicKey);
     return new E2EKeyPair(keyPair.privateKey, new Uint8Array(rawPub));
+  }
+
+  /** Export the raw private key bytes (32 bytes). */
+  async exportPrivateKey(): Promise<Uint8Array> {
+    // Node.js doesn't support "raw" export for X25519 private keys;
+    // use PKCS#8 and strip the 16-byte ASN.1 header.
+    const pkcs8 = await subtle.exportKey("pkcs8", this.privateKey);
+    const bytes = new Uint8Array(pkcs8);
+    // PKCS#8 for X25519: 16-byte header + 32-byte key
+    return bytes.slice(bytes.length - 32);
   }
 
   /**
@@ -258,4 +268,85 @@ export class E2EChannel {
     );
     return new Uint8Array(plaintext);
   }
+}
+
+// ---- Pairing record ----
+
+/** Persistent state from a completed pairing ceremony. */
+export interface PairingRecord {
+  peerInstanceID: string;
+  relayURL: string;
+  localPrivateKey: string; // base64-encoded raw X25519 private key
+  localPublicKey: string; // base64-encoded raw X25519 public key
+  peerPublicKey: string; // base64-encoded raw X25519 public key
+}
+
+/** Create a pairing record from a completed ceremony. */
+export async function createPairingRecord(
+  peerInstanceID: string,
+  relayURL: string,
+  localKeyPair: E2EKeyPair,
+  peerPublicKey: Uint8Array,
+): Promise<PairingRecord> {
+  const privBytes = await localKeyPair.exportPrivateKey();
+  return {
+    peerInstanceID,
+    relayURL,
+    localPrivateKey: btoa(String.fromCharCode(...privBytes)),
+    localPublicKey: btoa(String.fromCharCode(...localKeyPair.publicKeyData)),
+    peerPublicKey: btoa(String.fromCharCode(...peerPublicKey)),
+  };
+}
+
+/** Derive a channel from a stored pairing record. */
+export async function deriveChannelFromRecord(
+  record: PairingRecord,
+  sendInfo: Uint8Array,
+  recvInfo: Uint8Array,
+): Promise<E2EChannel> {
+  const privateKeyBytes = Uint8Array.from(atob(record.localPrivateKey), (c) =>
+    c.charCodeAt(0),
+  );
+  const peerPubBytes = Uint8Array.from(atob(record.peerPublicKey), (c) =>
+    c.charCodeAt(0),
+  );
+
+  // PKCS#8 header for X25519 private keys (16 bytes).
+  const pkcs8Header = new Uint8Array([
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e,
+    0x04, 0x22, 0x04, 0x20,
+  ]);
+  const pkcs8 = new Uint8Array(pkcs8Header.length + privateKeyBytes.length);
+  pkcs8.set(pkcs8Header, 0);
+  pkcs8.set(privateKeyBytes, pkcs8Header.length);
+
+  // Import private key via PKCS#8 (Node.js doesn't support raw X25519 import).
+  const privateKey = await subtle.importKey(
+    "pkcs8",
+    pkcs8,
+    "X25519",
+    false,
+    ["deriveBits"],
+  );
+  const peerPublicKey = await subtle.importKey(
+    "raw",
+    peerPubBytes,
+    "X25519",
+    false,
+    [],
+  );
+
+  // Derive shared secret via ECDH.
+  const sharedBits = await subtle.deriveBits(
+    { name: "X25519", public: peerPublicKey },
+    privateKey,
+    256,
+  );
+  const shared = new Uint8Array(sharedBits);
+
+  // Derive directional keys via HKDF.
+  const sendKey = await deriveKeyFromSecret(shared, sendInfo);
+  const recvKey = await deriveKeyFromSecret(shared, recvInfo);
+
+  return E2EChannel.create(sendKey, recvKey);
 }

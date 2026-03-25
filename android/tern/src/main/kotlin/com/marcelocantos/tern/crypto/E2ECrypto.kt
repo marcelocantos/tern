@@ -5,7 +5,9 @@ package com.marcelocantos.tern.crypto
 
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
+import java.security.PrivateKey
 import java.security.PublicKey
+import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
@@ -28,6 +30,13 @@ private val X25519_X509_HEADER = byteArrayOf(
     0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x6E, 0x03, 0x21, 0x00
 )
 
+// PKCS#8 PrivateKeyInfo header for X25519 (16 bytes, fixed).
+// ASN.1: SEQUENCE { INTEGER 0, SEQUENCE { OID 1.3.101.110 }, OCTET STRING { OCTET STRING { key } } }
+private val X25519_PKCS8_HEADER = byteArrayOf(
+    0x30, 0x2E, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+    0x03, 0x2B, 0x65, 0x6E, 0x04, 0x22, 0x04, 0x20
+)
+
 // ---- Key exchange ----
 
 /** An X25519 ECDH key pair for key exchange. */
@@ -38,6 +47,13 @@ class E2EKeyPair {
     val publicKeyData: ByteArray
         get() {
             val encoded = keyPair.public.encoded
+            return encoded.copyOfRange(encoded.size - 32, encoded.size)
+        }
+
+    /** Raw private key bytes (32 bytes) for persistent storage. */
+    val privateKeyData: ByteArray
+        get() {
+            val encoded = keyPair.private.encoded
             return encoded.copyOfRange(encoded.size - 32, encoded.size)
         }
 
@@ -231,9 +247,87 @@ class E2EChannel private constructor(
 
 class E2EException(message: String) : Exception(message)
 
+// ---- Pairing record ----
+
+/**
+ * Persistent state from a completed pairing ceremony.
+ * Serialize to JSON and store in EncryptedSharedPreferences or similar.
+ * On reconnect, load it and call [deriveChannel] to derive session keys
+ * without repeating the ECDH ceremony.
+ */
+data class PairingRecord(
+    val peerInstanceID: String,
+    val relayURL: String,
+    val localPrivateKey: ByteArray,  // raw X25519, 32 bytes
+    val localPublicKey: ByteArray,   // raw X25519, 32 bytes
+    val peerPublicKey: ByteArray,    // raw X25519, 32 bytes
+) {
+    constructor(
+        peerInstanceID: String,
+        relayURL: String,
+        localKeyPair: E2EKeyPair,
+        peerPublicKey: ByteArray,
+    ) : this(
+        peerInstanceID = peerInstanceID,
+        relayURL = relayURL,
+        localPrivateKey = localKeyPair.privateKeyData,
+        localPublicKey = localKeyPair.publicKeyData,
+        peerPublicKey = peerPublicKey,
+    )
+
+    /** Derive an encrypted channel from the stored keys. */
+    fun deriveChannel(sendInfo: ByteArray, recvInfo: ByteArray): E2EChannel {
+        val sendKey = deriveSessionKeyFromRaw(localPrivateKey, peerPublicKey, sendInfo)
+        val recvKey = deriveSessionKeyFromRaw(localPrivateKey, peerPublicKey, recvInfo)
+        return E2EChannel(sendKey, recvKey)
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is PairingRecord) return false
+        return peerInstanceID == other.peerInstanceID &&
+            relayURL == other.relayURL &&
+            localPrivateKey.contentEquals(other.localPrivateKey) &&
+            localPublicKey.contentEquals(other.localPublicKey) &&
+            peerPublicKey.contentEquals(other.peerPublicKey)
+    }
+
+    override fun hashCode(): Int {
+        var result = peerInstanceID.hashCode()
+        result = 31 * result + relayURL.hashCode()
+        result = 31 * result + localPrivateKey.contentHashCode()
+        result = 31 * result + localPublicKey.contentHashCode()
+        result = 31 * result + peerPublicKey.contentHashCode()
+        return result
+    }
+}
+
+/**
+ * Derive a session key from raw private key bytes, raw peer public key bytes,
+ * and an info parameter via ECDH + HKDF-SHA256.
+ */
+internal fun deriveSessionKeyFromRaw(
+    privateKeyBytes: ByteArray,
+    peerPublicKeyBytes: ByteArray,
+    info: ByteArray,
+): ByteArray {
+    val priv = rawToX25519PrivateKey(privateKeyBytes)
+    val pub = rawToX25519PublicKey(peerPublicKeyBytes)
+    val ka = KeyAgreement.getInstance("X25519")
+    ka.init(priv)
+    ka.doPhase(pub, true)
+    val shared = ka.generateSecret()
+    return Hkdf.derive(shared, info)
+}
+
 // ---- Internal helpers ----
 
 private fun rawToX25519PublicKey(raw: ByteArray): PublicKey {
     val encoded = X25519_X509_HEADER + raw
     return KeyFactory.getInstance("X25519").generatePublic(X509EncodedKeySpec(encoded))
+}
+
+private fun rawToX25519PrivateKey(raw: ByteArray): PrivateKey {
+    val encoded = X25519_PKCS8_HEADER + raw
+    return KeyFactory.getInstance("X25519").generatePrivate(PKCS8EncodedKeySpec(encoded))
 }

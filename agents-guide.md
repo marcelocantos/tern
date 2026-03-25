@@ -143,6 +143,28 @@ user verifies codes match on both devices
 
 MitM detection: the 6-digit confirmation code is `HKDF(min(a,b) || max(a,b), "pairing-confirmation")`. An adversary who substituted their own public key gets a different code — both devices show mismatched codes and the user aborts.
 
+## Persistent Pairing
+
+After the first pairing ceremony, save a `PairingRecord` for reconnection
+without repeating the ceremony:
+
+```go
+// After first pairing — save securely (e.g., Keychain, EncryptedSharedPreferences)
+record := crypto.NewPairingRecord(backend.InstanceID(), relayURL, myKeyPair, peerPubKey)
+data, _ := record.Marshal()
+
+// On reconnect — load and derive channel
+record, _ := crypto.UnmarshalPairingRecord(data)
+ch, _ := record.DeriveChannel([]byte("client-to-server"), []byte("server-to-client"))
+conn, _ := tern.Connect(ctx, record.RelayURL, record.PeerInstanceID)
+conn.SetChannel(ch)
+```
+
+The shared secret is re-derived on each reconnect (never stored). Available
+on all platforms: Go (`crypto.PairingRecord`), Swift (`PairingRecord`),
+Kotlin (`PairingRecord`), TypeScript (`PairingRecord` /
+`createPairingRecord` / `deriveChannelFromRecord`).
+
 ## Common Commands
 
 ```bash

@@ -172,6 +172,31 @@ The full ceremony involves three actors — **server** (backend daemon),
 
 ![Pairing ceremony state machines](docs/PairingCeremony.svg)
 
+## Persistent Pairing
+
+After the first pairing ceremony, save a `PairingRecord` for reconnection
+without re-scanning the QR code:
+
+```go
+// After first pairing — save this securely
+record := crypto.NewPairingRecord(backend.InstanceID(), relayURL, myKeyPair, peerPubKey)
+data, _ := record.Marshal()
+os.WriteFile("pairing.json", data, 0600)
+
+// On reconnect — load and derive channel
+data, _ = os.ReadFile("pairing.json")
+record, _ = crypto.UnmarshalPairingRecord(data)
+ch, _ := record.DeriveChannel([]byte("client-to-server"), []byte("server-to-client"))
+conn, _ := tern.Connect(ctx, record.RelayURL, record.PeerInstanceID)
+conn.SetChannel(ch)
+```
+
+The shared secret is never stored — it is re-derived on each reconnect from
+the private key and peer public key via ECDH + HKDF. `PairingRecord` is
+available on all platforms: Go (`crypto.PairingRecord`), Swift
+(`PairingRecord`), Kotlin (`PairingRecord`), and TypeScript
+(`PairingRecord` / `createPairingRecord` / `deriveChannelFromRecord`).
+
 ## Running the Relay Server
 
 ```bash

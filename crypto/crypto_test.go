@@ -442,6 +442,60 @@ func TestConfirmationCodeCrossplatformVector(t *testing.T) {
 	}
 }
 
+func TestPairingRecordRoundTrip(t *testing.T) {
+	// Simulate a pairing: two key pairs, record one side.
+	serverKP, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientKP, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	record := NewPairingRecord("server-uuid", "https://relay.example.com", clientKP, serverKP.Public)
+
+	// Marshal/unmarshal.
+	data, err := record.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := UnmarshalPairingRecord(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Derive channel from restored record.
+	ch, err := restored.DeriveChannel([]byte("c2s"), []byte("s2c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Derive the same channel from the original keys (server side).
+	serverSendKey, err := DeriveSessionKey(serverKP.Private, clientKP.Public, []byte("s2c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverRecvKey, err := DeriveSessionKey(serverKP.Private, clientKP.Public, []byte("c2s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCh, err := NewChannel(serverSendKey, serverRecvKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify they can communicate.
+	ct := ch.Encrypt([]byte("hello from restored record"))
+	pt, err := serverCh.Decrypt(ct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(pt) != "hello from restored record" {
+		t.Fatalf("got %q", pt)
+	}
+}
+
 func TestDeriveConfirmationCode(t *testing.T) {
 	client, err := GenerateKeyPair()
 	if err != nil {
