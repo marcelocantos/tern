@@ -189,9 +189,16 @@ func main() {
 		healthMux := http.NewServeMux()
 		healthMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			// Alt-Svc header tells browsers that HTTP/3 (and thus WebTransport)
-			// is available on the same port. Without this, browsers won't attempt
-			// QUIC and WebTransport handshakes will fail.
+			// is available on the same port.
 			w.Header().Set("Alt-Svc", `h3=":443"; ma=86400`)
+			// CORS headers for browser access from any origin.
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(204)
+				return
+			}
 
 			if r.URL.Path == "/health" {
 				w.Header().Set("Content-Type", "application/json")
