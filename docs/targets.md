@@ -213,21 +213,6 @@ on the shared QUIC datagram pipe.
 
 ---
 
-### 🎯T13 Certmagic storage alignment
-
-Ensure certmagic's storage path aligns with the Fly.io volume mount.
-Currently certmagic may create new ACME accounts on every cold start
-because the storage path doesn't match the mount. Verify that
-`XDG_DATA_HOME=/data/certmagic` correctly persists certs, accounts,
-and OCSP staples across deploys and restarts.
-
-- **Weight**: 2.5 (value 5 / cost 2)
-- **Status**: done — verified 2026-03-28. ACME account, cert, and key
-  persist in /data/certmagic on the Fly volume. Cert is reused on
-  restart without re-provisioning.
-
----
-
 ### 🎯T14 Browser WebTransport E2E
 
 Prove the browser WebTransport path works end-to-end.
@@ -293,6 +278,13 @@ tests work without manual machine management.
 ---
 
 ## Achieved
+
+### 🎯T13 Certmagic storage alignment
+
+- **Weight**: 1 (value 1 / cost 1)
+- **Status**: done — verified 2026-03-28. ACME account, cert, and key
+  persist in /data/certmagic on the Fly volume. Cert is reused on
+  restart without re-provisioning.
 
 ### 🎯T1.1 Crypto library migrated from jevon
 

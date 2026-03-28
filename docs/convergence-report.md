@@ -4,11 +4,13 @@ Evaluated: 2026-03-28
 
 Standing invariants: all green. CI passing (5/5 recent runs succeeded). No open PRs.
 
-## Gap Report
+## Movement
 
-### 🎯T13 Certmagic storage alignment  [highest weight: 2.5]
-Gap: significant
-`fly.toml` sets `XDG_DATA_HOME=/data/certmagic` and mounts a volume at `/data/certmagic`. Dockerfile creates the directory. Configuration looks correct, but the target requires runtime verification that certs, ACME accounts, and OCSP staples persist across deploys and machine restarts. Needs a deploy + restart cycle to confirm.
+- 🎯T13: significant -> **achieved** (runtime verification confirmed certs persist)
+- 🎯T14: status updated (Playwright headless Chromium confirmed not to support WebTransport/QUIC)
+- All others: (unchanged)
+
+## Gap Report
 
 ### 🎯T1 Tern is a complete library  [weight: 1.7]
 Gap: converging (7/8 sub-targets achieved)
@@ -24,7 +26,7 @@ Gap: converging (7/8 sub-targets achieved)
 
 ### 🎯T3 Fly.io deployment via CI  [weight: 1.7]
 Gap: not started
-CI workflow exists (`.github/workflows/ci.yml`) but only runs `go test`. No Fly.io deploy step. Needs a deploy workflow or a step in the existing CI that calls `flyctl deploy`.
+CI workflow exists (`.github/workflows/ci.yml`) but only runs `go test`. No Fly.io deploy step. Needs a deploy workflow or step that calls `flyctl deploy`.
 
 ### 🎯T5.1 Reorder-tolerant decryption  [weight: 1.7]
 Gap: not started
@@ -37,7 +39,7 @@ Gap: not started (0/2 sub-targets achieved)
   [ ] 🎯T12.2 Datagram channels — not started (blocked on 🎯T12.1)
 
 ### 🎯T16 Fly.io auto-start for UDP  [weight: 1.7]
-Gap: not started (status only)
+Gap: not started
 No implementation or investigation artifacts found.
 
 ### 🎯T6 Investigate STUN/NAT hole-punching  [weight: 1.5]  (status only)
@@ -45,6 +47,10 @@ Status: not started
 
 ### 🎯T17 Makefile deploy target  [weight: 1.5]  (status only)
 Status: not started
+
+### 🎯T13 Certmagic storage alignment  [weight: 2.5]
+Gap: **achieved**
+Verified 2026-03-28. ACME account, cert, and key persist in /data/certmagic on the Fly volume. Cert is reused on restart without re-provisioning. Moved to Achieved section.
 
 ### 🎯T7 Investigate Bluetooth as proximity oracle  [weight: 1.0]  (status only)
 Status: not started
@@ -59,7 +65,7 @@ Gap: converging (3/5 sub-targets achieved)
   [ ] 🎯T8.5 LAN direct WebTransport — not started (blocked on 🎯T8.4)
 
 ### 🎯T14 Browser WebTransport E2E  [weight: 1.0]  (status only)
-Status: not started. Note: the LE rate limit block (retries after 2026-03-24) has expired — this target is now unblocked.
+Status: blocked on Playwright headless Chromium QUIC support. LE rate limit block has expired. Server config verified correct. Options: headed Chrome, Selenium, or manual verification.
 
 ### 🎯T15 Gomobile bindings  [weight: 1.0]  (status only)
 Status: not started
@@ -74,24 +80,21 @@ Low weight (cost exceeds value ratio). Consider whether this is needed before �
 
 ## Recommendation
 
-Work on: **🎯T13 Certmagic storage alignment**
-Reason: Highest effective weight (2.5) among unblocked targets. Low cost (2), high value (5). The infrastructure configuration appears correct but needs runtime verification. Resolving this ensures Let's Encrypt certs persist, which also unblocks 🎯T14 (browser WebTransport E2E) from the cert provisioning side.
+Work on: **🎯T3 Fly.io deployment via CI**
+Reason: Tied at 1.7 effective weight with T1.8, T5.1, T12.1, and T16. T3 is the highest-leverage choice because it eliminates manual deploy friction for every subsequent change, directly supports T16 (auto-start investigation benefits from automated deploys), and is a prerequisite mindset for T17 (Makefile deploy target). Low risk, well-understood scope (add `flyctl deploy` step to existing CI workflow).
 
 ## Suggested action
 
-SSH into the Fly.io machine (`fly ssh console`) and verify that `/data/certmagic` contains certmagic's expected directory structure (accounts, certificates, ocsp). Check that `certmagic.NewDefault()` uses the `XDG_DATA_HOME` path. If the directory is empty or missing expected files, inspect certmagic's `DefaultStorage` to confirm it reads `XDG_DATA_HOME`. Deploy, wait for cert provisioning, then restart the machine and verify the cert is reused without re-provisioning.
+Add a deploy job to `.github/workflows/ci.yml` that runs after tests pass on the `master` branch. Use `superfly/flyctl-setup-action` and `flyctl deploy --remote-only`. Store the Fly API token as a GitHub secret (`FLY_API_TOKEN`). Gate the deploy step on `github.ref == 'refs/heads/master'` so PRs only run tests.
 
 <!-- convergence-deps
-evaluated: 2026-03-28T00:00:00Z
-sha: c28f530
+evaluated: 2026-03-28T12:00:00Z
+sha: 68118b3
 
 🎯T13:
-  gap: significant
-  assessment: "fly.toml config looks correct (XDG_DATA_HOME + volume mount), but needs runtime verification."
+  gap: achieved
+  assessment: "Verified done. Moved to Achieved section."
   read:
-    - fly.toml
-    - cmd/tern/main.go
-    - Dockerfile
     - docs/targets.md
 
 🎯T1:
@@ -118,4 +121,18 @@ sha: c28f530
   assessment: "No buffering logic in Channel.Decrypt."
   read:
     - crypto/crypto.go
+
+🎯T16:
+  gap: not started
+  assessment: "No implementation or investigation artifacts found."
+  read:
+    - fly.toml
+
+🎯T14:
+  gap: significant
+  assessment: "Playwright headless Chromium doesn't support WebTransport. Need alternative approach."
+  read:
+    - docs/targets.md
+    - webtransport.go
+    - cmd/tern/main.go
 -->
