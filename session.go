@@ -83,12 +83,37 @@ func (h *hub) get(id string) *instance {
 // through the relay). This is inherent to the 1:1 relay design. For
 // protection against malicious slow clients, add bounded message buffers
 // with drop-on-overflow.
+// streamTracker tracks active bridge streams so they can be closed externally,
+// unblocking goroutines stuck in pending reads.
+type streamTracker struct {
+	mu      sync.Mutex
+	streams []readWriteCloserPair
+}
+
+func (t *streamTracker) add(s readWriteCloserPair) {
+	t.mu.Lock()
+	t.streams = append(t.streams, s)
+	t.mu.Unlock()
+}
+
+// closeAll closes all tracked streams, unblocking any pending reads.
+func (t *streamTracker) closeAll() {
+	t.mu.Lock()
+	streams := t.streams
+	t.streams = nil
+	t.mu.Unlock()
+	for _, s := range streams {
+		_ = s.Close()
+	}
+}
+
 func bridgeClient(inst *instance, clientSession relaySession) {
 	ctx, cancel := context.WithCancel(clientSession.Context())
 	defer cancel()
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
+	tracker := &streamTracker{}
 
 	// backend stream -> client stream
 	wg.Add(1)
@@ -169,6 +194,8 @@ func bridgeClient(inst *instance, clientSession relaySession) {
 				backendStream.Close()
 				return
 			}
+			tracker.add(backendStream)
+			tracker.add(clientStream)
 			// Bridge this stream pair in both directions.
 			wg.Add(2)
 			go func() {
@@ -196,6 +223,8 @@ func bridgeClient(inst *instance, clientSession relaySession) {
 				clientStream.Close()
 				return
 			}
+			tracker.add(clientStream)
+			tracker.add(backendStream)
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
@@ -219,6 +248,12 @@ func bridgeClient(inst *instance, clientSession relaySession) {
 	}
 
 	cancel() // stop datagram goroutines and stream accept loops
+
+	// Close all tracked bridge streams to unblock any goroutines stuck in
+	// pending reads (e.g. handleSessionGoneError in the WT library) that
+	// would otherwise wait for QUIC-level session cleanup to propagate.
+	tracker.closeAll()
+
 	wg.Wait()
 }
 
@@ -229,9 +264,11 @@ func bridgeStream(src, dst readWriteCloserPair) {
 	for {
 		msg, err := src.ReadMessage()
 		if err != nil {
+			slog.Debug("bridgeStream: read error", "err", err)
 			return
 		}
 		if err := dst.WriteMessage(msg); err != nil {
+			slog.Debug("bridgeStream: write error", "err", err)
 			return
 		}
 	}

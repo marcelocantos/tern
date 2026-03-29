@@ -301,6 +301,14 @@ func connectWebTransport(ctx context.Context, relayURL, instanceID string, o opt
 		return nil, fmt.Errorf("connect: handshake: %w", err)
 	}
 
+	// Wait for the relay's acknowledgment. This ensures the relay has processed
+	// the handshake before we return, so any additional streams opened after
+	// Connect() returns are safely ordered after the primary stream.
+	if _, err := readMessage(stream); err != nil {
+		session.CloseWithError(0, "failed to read handshake ack")
+		return nil, fmt.Errorf("connect: read ack: %w", err)
+	}
+
 	closer := wtCloser{session}
 	return newConn(stream, session, closer, wtOpener{session}, wtAcceptor{session}, instanceID), nil
 }

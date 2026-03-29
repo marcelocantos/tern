@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -40,7 +41,14 @@ type wtStreamWrapper struct {
 
 func (w *wtStreamWrapper) ReadMessage() ([]byte, error)  { return readMessage(w.stream) }
 func (w *wtStreamWrapper) WriteMessage(data []byte) error { w.writeMu.Lock(); defer w.writeMu.Unlock(); return writeMessage(w.stream, data) }
-func (w *wtStreamWrapper) Close() error                   { return w.stream.Close() }
+func (w *wtStreamWrapper) Close() error {
+	// Set a past read deadline to unblock any pending ReadMessage call
+	// (including handleSessionGoneError waits inside the WT library).
+	// This avoids hanging indefinitely when the session close signal
+	// is delayed through the QUIC stack.
+	_ = w.stream.SetReadDeadline(time.Unix(0, 1))
+	return w.stream.Close()
+}
 
 func (s *wtSession) ReadMessage() ([]byte, error) {
 	return readMessage(s.stream)
@@ -296,9 +304,18 @@ func (s *WebTransportServer) handleClient(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Read and discard the handshake message.
+	// Read the handshake message.
 	if _, err := readMessage(clientStream); err != nil {
 		slog.Error("client: read handshake failed", "err", err)
+		return
+	}
+
+	// Send acknowledgment so the client knows the relay has processed the
+	// handshake. This ensures any additional streams opened after Connect()
+	// returns are enqueued after the primary stream in the relay's accept queue,
+	// avoiding stream ordering races in the WebTransport session manager.
+	if err := writeMessage(clientStream, []byte("ok")); err != nil {
+		slog.Error("client: write ack failed", "err", err)
 		return
 	}
 

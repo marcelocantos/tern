@@ -156,136 +156,136 @@ func TestEncryptedStreamingChannel(t *testing.T) {
 }
 
 func TestChannelOpenedByBackend(t *testing.T) {
-	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		b, c := connectPair(t, env)
 
-	b, c := connectPair(t, env)
+		// Backend opens a channel (reverse direction from typical).
+		ch, err := b.OpenChannel("backend-initiated")
+		if err != nil {
+			t.Fatal("open channel:", err)
+		}
+		defer ch.Close()
 
-	// Backend opens a channel (reverse direction from typical).
-	ch, err := b.OpenChannel("backend-initiated")
-	if err != nil {
-		t.Fatal("open channel:", err)
-	}
-	defer ch.Close()
+		cch, err := c.AcceptChannel(ctx)
+		if err != nil {
+			t.Fatal("accept channel:", err)
+		}
+		defer cch.Close()
 
-	cch, err := c.AcceptChannel(ctx)
-	if err != nil {
-		t.Fatal("accept channel:", err)
-	}
-	defer cch.Close()
+		if cch.Name() != "backend-initiated" {
+			t.Fatalf("got channel name %q, want backend-initiated", cch.Name())
+		}
 
-	if cch.Name() != "backend-initiated" {
-		t.Fatalf("got channel name %q, want backend-initiated", cch.Name())
-	}
-
-	if err := ch.Send(ctx, []byte("from-backend")); err != nil {
-		t.Fatal("send:", err)
-	}
-	data, err := cch.Recv(ctx)
-	if err != nil {
-		t.Fatal("recv:", err)
-	}
-	if string(data) != "from-backend" {
-		t.Fatalf("got %q, want from-backend", data)
-	}
+		if err := ch.Send(ctx, []byte("from-backend")); err != nil {
+			t.Fatal("send:", err)
+		}
+		data, err := cch.Recv(ctx)
+		if err != nil {
+			t.Fatal("recv:", err)
+		}
+		if string(data) != "from-backend" {
+			t.Fatalf("got %q, want from-backend", data)
+		}
+	})
 }
 
 func TestManyChannelsSimultaneously(t *testing.T) {
-	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		b, c := connectPair(t, env)
 
-	b, c := connectPair(t, env)
-
-	const n = 10
-	clientChans := make([]*StreamChannel, n)
-	for i := range n {
-		ch, err := c.OpenChannel(fmt.Sprintf("chan-%d", i))
-		if err != nil {
-			t.Fatalf("open channel %d: %v", i, err)
+		const n = 10
+		clientChans := make([]*StreamChannel, n)
+		for i := range n {
+			ch, err := c.OpenChannel(fmt.Sprintf("chan-%d", i))
+			if err != nil {
+				t.Fatalf("open channel %d: %v", i, err)
+			}
+			clientChans[i] = ch
+			defer ch.Close()
 		}
-		clientChans[i] = ch
-		defer ch.Close()
-	}
 
-	// Accept all channels on backend side.
-	backendChans := make(map[string]*StreamChannel, n)
-	for range n {
+		// Accept all channels on backend side.
+		backendChans := make(map[string]*StreamChannel, n)
+		for range n {
+			bch, err := b.AcceptChannel(ctx)
+			if err != nil {
+				t.Fatal("accept:", err)
+			}
+			backendChans[bch.Name()] = bch
+			defer bch.Close()
+		}
+
+		// Send on each client channel and verify it arrives on the correct backend channel.
+		for i, ch := range clientChans {
+			msg := fmt.Sprintf("msg-for-chan-%d", i)
+			if err := ch.Send(ctx, []byte(msg)); err != nil {
+				t.Fatalf("send on chan %d: %v", i, err)
+			}
+		}
+
+		for i := range n {
+			name := fmt.Sprintf("chan-%d", i)
+			bch := backendChans[name]
+			if bch == nil {
+				t.Fatalf("backend channel %q not found", name)
+			}
+			data, err := bch.Recv(ctx)
+			if err != nil {
+				t.Fatalf("recv on %s: %v", name, err)
+			}
+			expected := fmt.Sprintf("msg-for-chan-%d", i)
+			if string(data) != expected {
+				t.Fatalf("chan %s: got %q, want %q", name, data, expected)
+			}
+		}
+	})
+}
+
+func TestLargeMessageOnChannel(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		b, c := connectPair(t, env)
+
+		ch, err := c.OpenChannel("large-data")
+		if err != nil {
+			t.Fatal("open:", err)
+		}
+		defer ch.Close()
+
 		bch, err := b.AcceptChannel(ctx)
 		if err != nil {
 			t.Fatal("accept:", err)
 		}
-		backendChans[bch.Name()] = bch
 		defer bch.Close()
-	}
 
-	// Send on each client channel and verify it arrives on the correct backend channel.
-	for i, ch := range clientChans {
-		msg := fmt.Sprintf("msg-for-chan-%d", i)
-		if err := ch.Send(ctx, []byte(msg)); err != nil {
-			t.Fatalf("send on chan %d: %v", i, err)
+		// 100KB message.
+		msg := make([]byte, 100*1024)
+		for i := range msg {
+			msg[i] = byte(i % 251) // non-trivial pattern
 		}
-	}
 
-	for i := range n {
-		name := fmt.Sprintf("chan-%d", i)
-		bch := backendChans[name]
-		if bch == nil {
-			t.Fatalf("backend channel %q not found", name)
+		if err := ch.Send(ctx, msg); err != nil {
+			t.Fatal("send:", err)
 		}
 		data, err := bch.Recv(ctx)
 		if err != nil {
-			t.Fatalf("recv on %s: %v", name, err)
+			t.Fatal("recv:", err)
 		}
-		expected := fmt.Sprintf("msg-for-chan-%d", i)
-		if string(data) != expected {
-			t.Fatalf("chan %s: got %q, want %q", name, data, expected)
+		if len(data) != len(msg) {
+			t.Fatalf("received %d bytes, want %d", len(data), len(msg))
 		}
-	}
-}
-
-func TestLargeMessageOnChannel(t *testing.T) {
-	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	b, c := connectPair(t, env)
-
-	ch, err := c.OpenChannel("large-data")
-	if err != nil {
-		t.Fatal("open:", err)
-	}
-	defer ch.Close()
-
-	bch, err := b.AcceptChannel(ctx)
-	if err != nil {
-		t.Fatal("accept:", err)
-	}
-	defer bch.Close()
-
-	// 100KB message.
-	msg := make([]byte, 100*1024)
-	for i := range msg {
-		msg[i] = byte(i % 251) // non-trivial pattern
-	}
-
-	if err := ch.Send(ctx, msg); err != nil {
-		t.Fatal("send:", err)
-	}
-	data, err := bch.Recv(ctx)
-	if err != nil {
-		t.Fatal("recv:", err)
-	}
-	if len(data) != len(msg) {
-		t.Fatalf("received %d bytes, want %d", len(data), len(msg))
-	}
-	for i := range msg {
-		if data[i] != msg[i] {
-			t.Fatalf("byte %d: got %d, want %d", i, data[i], msg[i])
-			break
+		for i := range msg {
+			if data[i] != msg[i] {
+				t.Fatalf("byte %d: got %d, want %d", i, data[i], msg[i])
+				break
+			}
 		}
-	}
+	})
 }
 
 func TestChannelClosedMidConversation(t *testing.T) {
@@ -376,43 +376,43 @@ func TestChannelNameSpecialCharacters(t *testing.T) {
 }
 
 func TestRapidOpenAccept(t *testing.T) {
-	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		b, c := connectPair(t, env)
 
-	b, c := connectPair(t, env)
+		const n = 50
 
-	const n = 50
-
-	// Open 50 channels rapidly.
-	clientChans := make([]*StreamChannel, n)
-	for i := range n {
-		ch, err := c.OpenChannel(fmt.Sprintf("rapid-%d", i))
-		if err != nil {
-			t.Fatalf("open %d: %v", i, err)
+		// Open 50 channels rapidly.
+		clientChans := make([]*StreamChannel, n)
+		for i := range n {
+			ch, err := c.OpenChannel(fmt.Sprintf("rapid-%d", i))
+			if err != nil {
+				t.Fatalf("open %d: %v", i, err)
+			}
+			clientChans[i] = ch
+			defer ch.Close()
 		}
-		clientChans[i] = ch
-		defer ch.Close()
-	}
 
-	// Accept all on backend side.
-	backendNames := make(map[string]bool, n)
-	for range n {
-		bch, err := b.AcceptChannel(ctx)
-		if err != nil {
-			t.Fatal("accept:", err)
+		// Accept all on backend side.
+		backendNames := make(map[string]bool, n)
+		for range n {
+			bch, err := b.AcceptChannel(ctx)
+			if err != nil {
+				t.Fatal("accept:", err)
+			}
+			backendNames[bch.Name()] = true
+			defer bch.Close()
 		}
-		backendNames[bch.Name()] = true
-		defer bch.Close()
-	}
 
-	// Verify all channels were accepted.
-	for i := range n {
-		name := fmt.Sprintf("rapid-%d", i)
-		if !backendNames[name] {
-			t.Fatalf("channel %q not accepted", name)
+		// Verify all channels were accepted.
+		for i := range n {
+			name := fmt.Sprintf("rapid-%d", i)
+			if !backendNames[name] {
+				t.Fatalf("channel %q not accepted", name)
+			}
 		}
-	}
+	})
 }
 
 // --- Datagram channel tests ---
@@ -684,90 +684,90 @@ func TestOversizedMessage(t *testing.T) {
 }
 
 func TestZeroLengthMessage(t *testing.T) {
-	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		b, c := connectPair(t, env)
 
-	b, c := connectPair(t, env)
-
-	// Send empty data.
-	if err := c.Send(ctx, []byte{}); err != nil {
-		t.Fatal("send empty:", err)
-	}
-	data, err := b.Recv(ctx)
-	if err != nil {
-		t.Fatal("recv empty:", err)
-	}
-	if len(data) != 0 {
-		t.Fatalf("expected empty message, got %d bytes", len(data))
-	}
+		// Send empty data.
+		if err := c.Send(ctx, []byte{}); err != nil {
+			t.Fatal("send empty:", err)
+		}
+		data, err := b.Recv(ctx)
+		if err != nil {
+			t.Fatal("recv empty:", err)
+		}
+		if len(data) != 0 {
+			t.Fatalf("expected empty message, got %d bytes", len(data))
+		}
+	})
 }
 
 // --- Concurrent access tests ---
 
 func TestConcurrentSendsOnSameChannel(t *testing.T) {
-	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		b, c := connectPair(t, env)
 
-	b, c := connectPair(t, env)
+		ch, err := c.OpenChannel("concurrent-sends")
+		if err != nil {
+			t.Fatal("open:", err)
+		}
+		defer ch.Close()
 
-	ch, err := c.OpenChannel("concurrent-sends")
-	if err != nil {
-		t.Fatal("open:", err)
-	}
-	defer ch.Close()
+		bch, err := b.AcceptChannel(ctx)
+		if err != nil {
+			t.Fatal("accept:", err)
+		}
+		defer bch.Close()
 
-	bch, err := b.AcceptChannel(ctx)
-	if err != nil {
-		t.Fatal("accept:", err)
-	}
-	defer bch.Close()
+		const goroutines = 10
+		const msgsPerGoroutine = 10
+		var wg sync.WaitGroup
 
-	const goroutines = 10
-	const msgsPerGoroutine = 10
-	var wg sync.WaitGroup
+		for g := range goroutines {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for i := range msgsPerGoroutine {
+					ch.Send(ctx, []byte(fmt.Sprintf("g%d-m%d", id, i)))
+				}
+			}(g)
+		}
 
-	for g := range goroutines {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			for i := range msgsPerGoroutine {
-				ch.Send(ctx, []byte(fmt.Sprintf("g%d-m%d", id, i)))
-			}
-		}(g)
-	}
-
-	// Receive all messages.
-	received := make(map[string]bool)
-	var mu sync.Mutex
-	done := make(chan struct{})
-	go func() {
-		for {
-			data, err := bch.Recv(ctx)
-			if err != nil {
-				break
-			}
-			mu.Lock()
-			received[string(data)] = true
-			if len(received) == goroutines*msgsPerGoroutine {
+		// Receive all messages.
+		received := make(map[string]bool)
+		var mu sync.Mutex
+		done := make(chan struct{})
+		go func() {
+			for {
+				data, err := bch.Recv(ctx)
+				if err != nil {
+					break
+				}
+				mu.Lock()
+				received[string(data)] = true
+				if len(received) == goroutines*msgsPerGoroutine {
+					mu.Unlock()
+					close(done)
+					return
+				}
 				mu.Unlock()
-				close(done)
-				return
 			}
+		}()
+
+		wg.Wait()
+
+		select {
+		case <-done:
+		case <-ctx.Done():
+			mu.Lock()
+			t.Fatalf("timed out: received %d/%d messages", len(received), goroutines*msgsPerGoroutine)
 			mu.Unlock()
 		}
-	}()
-
-	wg.Wait()
-
-	select {
-	case <-done:
-	case <-ctx.Done():
-		mu.Lock()
-		t.Fatalf("timed out: received %d/%d messages", len(received), goroutines*msgsPerGoroutine)
-		mu.Unlock()
-	}
+	})
 }
 
 func TestConcurrentOpenAcceptChannels(t *testing.T) {
@@ -920,39 +920,40 @@ func TestContextCancellation(t *testing.T) {
 // --- Relay correctness tests ---
 
 func TestMessagesDontLeakBetweenInstances(t *testing.T) {
-	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
 
-	// Create two separate backend/client pairs.
-	b1, c1 := connectPair(t, env)
-	b2, c2 := connectPair(t, env)
+		// Create two separate backend/client pairs.
+		b1, c1 := connectPair(t, env)
+		b2, c2 := connectPair(t, env)
 
-	// Send on pair 1.
-	if err := c1.Send(ctx, []byte("pair-1-msg")); err != nil {
-		t.Fatal("send c1:", err)
-	}
-	// Send on pair 2.
-	if err := c2.Send(ctx, []byte("pair-2-msg")); err != nil {
-		t.Fatal("send c2:", err)
-	}
+		// Send on pair 1.
+		if err := c1.Send(ctx, []byte("pair-1-msg")); err != nil {
+			t.Fatal("send c1:", err)
+		}
+		// Send on pair 2.
+		if err := c2.Send(ctx, []byte("pair-2-msg")); err != nil {
+			t.Fatal("send c2:", err)
+		}
 
-	// Each backend should only get its own pair's message.
-	d1, err := b1.Recv(ctx)
-	if err != nil {
-		t.Fatal("recv b1:", err)
-	}
-	if string(d1) != "pair-1-msg" {
-		t.Fatalf("b1 got %q, want pair-1-msg", d1)
-	}
+		// Each backend should only get its own pair's message.
+		d1, err := b1.Recv(ctx)
+		if err != nil {
+			t.Fatal("recv b1:", err)
+		}
+		if string(d1) != "pair-1-msg" {
+			t.Fatalf("b1 got %q, want pair-1-msg", d1)
+		}
 
-	d2, err := b2.Recv(ctx)
-	if err != nil {
-		t.Fatal("recv b2:", err)
-	}
-	if string(d2) != "pair-2-msg" {
-		t.Fatalf("b2 got %q, want pair-2-msg", d2)
-	}
+		d2, err := b2.Recv(ctx)
+		if err != nil {
+			t.Fatal("recv b2:", err)
+		}
+		if string(d2) != "pair-2-msg" {
+			t.Fatalf("b2 got %q, want pair-2-msg", d2)
+		}
+	})
 }
 
 func TestSecondClientRejected(t *testing.T) {
@@ -1007,20 +1008,20 @@ func TestSecondClientRejected(t *testing.T) {
 }
 
 func TestBackendDisconnectClosesClient(t *testing.T) {
-	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		b, c := connectPair(t, env)
 
-	b, c := connectPair(t, env)
+		// Backend disconnects.
+		b.CloseNow()
 
-	// Backend disconnects.
-	b.CloseNow()
-
-	// Client recv should return error.
-	_, err := c.Recv(ctx)
-	if err == nil {
-		t.Fatal("expected error on recv after backend disconnect")
-	}
+		// Client recv should return error.
+		_, err := c.Recv(ctx)
+		if err == nil {
+			t.Fatal("expected error on recv after backend disconnect")
+		}
+	})
 }
 
 // --- PairingRecord tests ---
