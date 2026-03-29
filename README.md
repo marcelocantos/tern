@@ -197,6 +197,48 @@ available on all platforms: Go (`crypto.PairingRecord`), Swift
 (`PairingRecord`), Kotlin (`PairingRecord`), and TypeScript
 (`PairingRecord` / `createPairingRecord` / `deriveChannelFromRecord`).
 
+## Channels
+
+Named streaming channels and datagram channels provide independent,
+multiplexed communication paths over a single connection.
+
+```go
+// Streaming channels — independent ordered streams
+ch, _ := conn.OpenChannel("game-state")
+ch.Send(ctx, data)
+
+peerCh, _ := conn.AcceptChannel(ctx)
+data, _ := peerCh.Recv(ctx)
+
+// Datagram channels — named, unreliable, both sides create by name
+video := conn.DatagramChannel("camera-front")
+video.Send(frame)
+frame, _ := video.Recv(ctx)
+```
+
+Each streaming channel gets its own QUIC stream (no head-of-line
+blocking between channels). Datagram channels share the QUIC datagram
+pipe with a 2-byte channel ID prefix for demuxing.
+
+## Fault Injection Testing
+
+The `faultproxy` package provides a transparent UDP proxy for testing
+under adverse network conditions:
+
+```go
+proxy, _ := faultproxy.New(relayAddr,
+    faultproxy.WithLatency(50*time.Millisecond, 20*time.Millisecond),
+    faultproxy.WithPacketLoss(0.05),
+    faultproxy.WithCorrupt(0.01),
+)
+defer proxy.Close()
+// Connect to proxy.Addr() instead of the real relay.
+```
+
+Supports latency, jitter, packet loss, corruption, bandwidth
+throttling, blackhole periods, sequence-aware drop (`WithDropAfter`,
+`WithDropWindow`), and programmable per-packet hooks (`WithPacketHook`).
+
 ## Running the Relay Server
 
 ```bash
