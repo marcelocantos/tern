@@ -9,6 +9,63 @@ import (
 	"testing"
 )
 
+// Unit tests for internal helper functions.
+
+func TestGoConstPrefix(t *testing.T) {
+	tests := []struct {
+		actor string
+		want  string
+	}{
+		{"ios", "App"},
+		{"cli", "CLI"},
+		{"server", "Server"},
+		{"client", "Client"},
+		{"", ""},
+		{"x", "X"},
+	}
+	for _, tc := range tests {
+		got := goConstPrefix(tc.actor)
+		if got != tc.want {
+			t.Errorf("goConstPrefix(%q) = %q, want %q", tc.actor, got, tc.want)
+		}
+	}
+}
+
+func TestSwiftTypeName(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"server", "Server"},
+		{"ios", "Ios"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		got := swiftTypeName(tc.in)
+		if got != tc.want {
+			t.Errorf("swiftTypeName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSwiftCase(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"Idle", "idle"},
+		{"ServerIdle", "serverIdle"},
+		{"", ""},
+		{"PairBegin", "pairBegin"},
+	}
+	for _, tc := range tests {
+		got := swiftCase(tc.in)
+		if got != tc.want {
+			t.Errorf("swiftCase(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestExportGoStructure(t *testing.T) {
 	p := PairingCeremony()
 	var buf bytes.Buffer

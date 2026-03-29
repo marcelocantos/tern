@@ -545,3 +545,133 @@ func TestDeriveConfirmationCode(t *testing.T) {
 		t.Fatal("MitM client code should differ from honest code")
 	}
 }
+
+// Error path tests.
+
+func TestNewChannelBadKeySize(t *testing.T) {
+	// AES requires 16, 24, or 32-byte keys. A 7-byte key should fail.
+	badKey := []byte("tooshort")
+	goodKey := make([]byte, 32)
+	rand.Read(goodKey)
+
+	if _, err := NewChannel(badKey, goodKey); err == nil {
+		t.Fatal("expected error for bad sendKey size")
+	}
+	if _, err := NewChannel(goodKey, badKey); err == nil {
+		t.Fatal("expected error for bad recvKey size")
+	}
+}
+
+func TestNewDatagramChannelBadKeySize(t *testing.T) {
+	badKey := []byte("tooshort")
+	goodKey := make([]byte, 32)
+	rand.Read(goodKey)
+
+	if _, err := NewDatagramChannel(badKey, goodKey); err == nil {
+		t.Fatal("expected error for bad sendKey in NewDatagramChannel")
+	}
+}
+
+func TestSetMode(t *testing.T) {
+	clientCh, serverCh := newTestChannel(t)
+
+	// Encrypt a message in default (strict) mode.
+	ct := clientCh.Encrypt([]byte("hello"))
+
+	// Switch serverCh to datagram mode before decrypting.
+	serverCh.SetMode(ModeDatagrams)
+
+	// Now it should accept it just fine (seq=0 is >= recvSeq=0).
+	pt, err := serverCh.Decrypt(ct)
+	if err != nil {
+		t.Fatalf("decrypt after SetMode: %v", err)
+	}
+	if string(pt) != "hello" {
+		t.Fatalf("got %q, want %q", pt, "hello")
+	}
+
+	// Switch back to strict and verify it rejects out-of-order seq.
+	serverCh.SetMode(ModeStrict)
+	ct2 := clientCh.Encrypt([]byte("world"))
+	ct3 := clientCh.Encrypt([]byte("extra"))
+	_ = ct3
+	if _, err := serverCh.Decrypt(ct2); err != nil {
+		t.Fatalf("strict mode: expected success for in-order msg: %v", err)
+	}
+	// ct3 seq=2 would be correct, try replaying ct (seq=0) → should fail.
+	if _, err := serverCh.Decrypt(ct); err == nil {
+		t.Fatal("strict mode: expected replay rejection")
+	}
+}
+
+func TestDecryptTooShort(t *testing.T) {
+	clientCh, _ := newTestChannel(t)
+	// Anything shorter than 8 bytes should fail immediately.
+	if _, err := clientCh.Decrypt([]byte("short")); err == nil {
+		t.Fatal("expected error for too-short ciphertext")
+	}
+}
+
+func TestUnmarshalPairingRecordInvalidJSON(t *testing.T) {
+	if _, err := UnmarshalPairingRecord([]byte("{bad json")); err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestPairingRecordDeriveChannelBadLocalKey(t *testing.T) {
+	r := &PairingRecord{
+		LocalPrivateKey: []byte("not-a-valid-x25519-key"),
+		PeerPublicKey:   make([]byte, 32),
+	}
+	if _, err := r.DeriveChannel([]byte("s2c"), []byte("c2s")); err == nil {
+		t.Fatal("expected error for bad local private key")
+	}
+}
+
+func TestPairingRecordDeriveChannelBadPeerKey(t *testing.T) {
+	// Generate a valid private key, but use an invalid peer public key.
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &PairingRecord{
+		LocalPrivateKey: kp.Private.Bytes(),
+		PeerPublicKey:   []byte("not-a-valid-x25519-key"),
+	}
+	if _, err := r.DeriveChannel([]byte("s2c"), []byte("c2s")); err == nil {
+		t.Fatal("expected error for bad peer public key")
+	}
+}
+
+func TestDatagramModeEncryptDecrypt(t *testing.T) {
+	clientCh, serverCh := newTestDatagramChannel(t)
+
+	messages := []string{"alpha", "beta", "gamma"}
+	for _, msg := range messages {
+		ct := clientCh.Encrypt([]byte(msg))
+		pt, err := serverCh.Decrypt(ct)
+		if err != nil {
+			t.Fatalf("datagram decrypt %q: %v", msg, err)
+		}
+		if string(pt) != msg {
+			t.Fatalf("got %q, want %q", pt, msg)
+		}
+	}
+}
+
+func TestDeriveSessionKeyBadKey(t *testing.T) {
+	// Use a key pair from a different curve (P-256) — ECDH with X25519
+	// private key and P-256 public key should fail.
+	x25519KP, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p256Priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// X25519 private key with P-256 public key → ECDH must fail.
+	if _, err := DeriveSessionKey(x25519KP.Private, p256Priv.PublicKey(), []byte("info")); err == nil {
+		t.Fatal("expected error for cross-curve ECDH")
+	}
+}
