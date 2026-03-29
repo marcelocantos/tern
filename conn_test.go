@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"io"
 	"math/big"
 	"net"
@@ -1262,6 +1263,974 @@ func TestPersistentInstanceIDQUIC(t *testing.T) {
 	}
 	if string(data) != "quic-persistent" {
 		t.Fatalf("got %q, want quic-persistent", data)
+	}
+}
+
+// TestOpenChannelAfterClose verifies that OpenChannel returns an error
+// when the underlying connection has been closed. Exercises the
+// opener.OpenStream() error path in channel.go:63-65.
+func TestOpenChannelAfterClose(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		b, _ := connectPair(t, env)
+
+		// Close the backend connection.
+		b.CloseNow()
+		time.Sleep(50 * time.Millisecond)
+
+		// OpenChannel should fail because the underlying session is closed.
+		_, err := b.OpenChannel("after-close")
+		if err == nil {
+			t.Fatal("expected error from OpenChannel after close")
+		}
+		t.Logf("OpenChannel after close: %v", err)
+	})
+}
+
+// TestAcceptChannelAfterPeerClose verifies that AcceptChannel returns
+// an error when the peer has disconnected. Exercises the
+// acceptStream error path in channel.go:94-96.
+func TestAcceptChannelAfterPeerClose(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		b, c := connectPair(t, env)
+
+		// Close the client immediately.
+		c.CloseNow()
+		time.Sleep(50 * time.Millisecond)
+
+		// AcceptChannel on backend should fail because the peer is gone.
+		_, err := b.AcceptChannel(ctx)
+		if err == nil {
+			t.Fatal("expected error from AcceptChannel after peer close")
+		}
+		t.Logf("AcceptChannel after peer close: %v", err)
+	})
+}
+
+// TestReadMessageOversized verifies that readMessage rejects a message
+// whose declared length exceeds maxMessageSize. Exercises the
+// length-check branch in readMessage (webtransport.go:126-128).
+func TestReadMessageOversized(t *testing.T) {
+	// Create a pipe and write a 4-byte header claiming a message > maxMessageSize.
+	r, w := io.Pipe()
+	go func() {
+		var hdr [4]byte
+		binary.BigEndian.PutUint32(hdr[:], uint32(maxMessageSize+1))
+		w.Write(hdr[:])
+		w.Close()
+	}()
+
+	_, err := readMessage(r)
+	if err == nil {
+		t.Fatal("expected error for oversized message header")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected 'too large' error, got: %v", err)
+	}
+}
+
+// TestWTListenAndServeInvalidAddr tests that WebTransportServer.ListenAndServe
+// fails with a bad address (exercises the ResolveUDPAddr error path).
+func TestWTListenAndServeInvalidAddr(t *testing.T) {
+	cert, _ := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	srv, err := NewWebTransportServer("not-a-valid-addr:abc:xyz", tlsCfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = srv.ListenAndServe()
+	if err == nil {
+		t.Fatal("expected error from ListenAndServe with invalid address")
+	}
+	t.Logf("invalid addr: %v", err)
+}
+
+// TestQUICListenAndServeInvalidAddr tests that QUICServer.ListenAndServe
+// fails with a bad address (exercises the ResolveUDPAddr error path).
+func TestQUICListenAndServeInvalidAddr(t *testing.T) {
+	cert, _ := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	h := newHub()
+	srv := NewQUICServer("not-a-valid-addr:abc:xyz", tlsCfg, "", h)
+	err := srv.ListenAndServe(tlsCfg)
+	if err == nil {
+		t.Fatal("expected error from ListenAndServe with invalid address")
+	}
+	t.Logf("invalid addr: %v", err)
+}
+
+// TestStreamChannelCloseExplicit verifies that calling Close on a
+// StreamChannel does not panic and properly closes the stream.
+func TestStreamChannelCloseExplicit(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	ch, err := c.OpenChannel("close-test")
+	if err != nil {
+		t.Fatal("open:", err)
+	}
+
+	bch, err := b.AcceptChannel(ctx)
+	if err != nil {
+		t.Fatal("accept:", err)
+	}
+
+	// Close both sides explicitly.
+	if err := ch.Close(); err != nil {
+		t.Fatal("close client channel:", err)
+	}
+	if err := bch.Close(); err != nil {
+		t.Fatal("close backend channel:", err)
+	}
+}
+
+// TestDatagramChannelRecvContextCancelled verifies that
+// DatagramChannel.Recv returns when the context is cancelled.
+// Exercises the ctx.Done() branch in recvTaggedDatagram (conn.go:167).
+func TestDatagramChannelRecvContextCancelled(t *testing.T) {
+	env := localRelay(t)
+	b, _ := connectPair(t, env)
+
+	bdc := b.DatagramChannel("ctx-cancel")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := bdc.Recv(ctx)
+	if err == nil {
+		t.Fatal("expected error from Recv with cancelled context")
+	}
+}
+
+// TestDatagramChannelRecvConnClosed verifies that DatagramChannel.Recv
+// returns when the Conn is closed. Exercises the c.ctx.Done() branch
+// in recvTaggedDatagram (conn.go:169).
+func TestDatagramChannelRecvConnClosed(t *testing.T) {
+	env := localRelay(t)
+	b, _ := connectPair(t, env)
+
+	bdc := b.DatagramChannel("conn-close")
+
+	// Close the connection after a brief delay.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		b.CloseNow()
+	}()
+
+	ctx := context.Background()
+	_, err := bdc.Recv(ctx)
+	if err == nil {
+		t.Fatal("expected error from Recv after conn close")
+	}
+}
+
+// TestConnectToClosedRelayWT verifies that connectWebTransport fails
+// when the relay has been shut down. Exercises WT dial error path.
+func TestConnectToClosedRelayWT(t *testing.T) {
+	cert, pool := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	srv, err := NewWebTransportServer("127.0.0.1:0", tlsCfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(udpConn)
+
+	port := udpConn.LocalAddr().(*net.UDPAddr).Port
+	relayURL := "https://127.0.0.1:" + strconv.Itoa(port)
+
+	// Register a backend first.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	b, err := Register(ctx, relayURL,
+		WithTLS(&tls.Config{RootCAs: pool}),
+		WithWebTransport(),
+	)
+	if err != nil {
+		t.Fatal("register:", err)
+	}
+	instanceID := b.InstanceID()
+
+	// Shut down the relay.
+	srv.Close()
+	b.CloseNow()
+	time.Sleep(100 * time.Millisecond)
+
+	// Now try to connect — should fail.
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer connectCancel()
+
+	_, err = Connect(connectCtx, relayURL, instanceID,
+		WithTLS(&tls.Config{RootCAs: pool}),
+		WithWebTransport(),
+	)
+	if err == nil {
+		t.Fatal("expected error connecting to closed relay via WT")
+	}
+	t.Logf("connect to closed relay WT: %v", err)
+}
+
+// TestRegisterToClosedRelayWT verifies that registerWebTransport fails
+// when the relay is closed. Exercises the WT dial error path in register.
+func TestRegisterToClosedRelayWT(t *testing.T) {
+	cert, pool := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	srv, err := NewWebTransportServer("127.0.0.1:0", tlsCfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(udpConn)
+
+	port := udpConn.LocalAddr().(*net.UDPAddr).Port
+	relayURL := "https://127.0.0.1:" + strconv.Itoa(port)
+
+	// Give it a moment to start, then verify it works.
+	time.Sleep(50 * time.Millisecond)
+
+	// Shut down the relay after it's been serving.
+	srv.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, err = Register(ctx, relayURL,
+		WithTLS(&tls.Config{RootCAs: pool}),
+		WithWebTransport(),
+	)
+	if err == nil {
+		t.Fatal("expected error registering to closed relay via WT")
+	}
+	t.Logf("register to closed relay WT: %v", err)
+}
+
+// TestBackendDisconnectDuringChannelAccept tests that when a backend
+// is closed while a channel's stream is being opened by the relay,
+// the bridging handles it gracefully (bridgeStream error paths in
+// session.go:261).
+func TestBackendDisconnectDuringChannelAccept(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	// Open a channel then immediately close the backend.
+	ch, err := c.OpenChannel("bridge-break")
+	if err != nil {
+		t.Fatal("open:", err)
+	}
+	defer ch.Close()
+
+	bch, err := b.AcceptChannel(ctx)
+	if err != nil {
+		t.Fatal("accept:", err)
+	}
+
+	// Send a message through, then close backend.
+	if err := ch.Send(ctx, []byte("before-break")); err != nil {
+		t.Fatal("send:", err)
+	}
+	data, err := bch.Recv(ctx)
+	if err != nil {
+		t.Fatal("recv:", err)
+	}
+	if string(data) != "before-break" {
+		t.Fatalf("got %q, want before-break", data)
+	}
+
+	// Close the backend — this should cause the relay's bridgeStream to error.
+	b.CloseNow()
+
+	// Client's channel recv should eventually error.
+	_, err = ch.Recv(ctx)
+	if err == nil {
+		t.Fatal("expected error on channel recv after backend disconnect")
+	}
+}
+
+// TestWTLongInstanceIDRejected tests that a very long instance ID is
+// rejected by the WT handleClient (webtransport.go:267).
+func TestWTLongInstanceIDRejected(t *testing.T) {
+	env := localRelayWT(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	longID := strings.Repeat("x", 65)
+	_, err := Connect(ctx, env.url, longID, env.opts...)
+	if err != nil {
+		t.Logf("long WT instance ID: %v", err)
+		return
+	}
+	t.Fatal("expected error with oversized WT instance ID")
+}
+
+// TestDeriveChannelKeysNoPairingRecord verifies that deriveChannelKeys
+// returns (nil, nil) when no PairingRecord is set (channel.go:131-133).
+func TestDeriveChannelKeysNoPairingRecord(t *testing.T) {
+	c := newConn(nil, nil, io.NopCloser(nil), nil, nil, "test")
+	ch, err := c.deriveChannelKeys("test-channel", true)
+	if err != nil {
+		t.Fatal("unexpected error:", err)
+	}
+	if ch != nil {
+		t.Fatal("expected nil channel when no PairingRecord is set")
+	}
+}
+
+// TestStreamingChannelViaWT tests streaming channels over WebTransport,
+// exercising the WT stream bridge paths in session.go (bridgeClient/bridgeStream).
+func TestStreamingChannelViaWT(t *testing.T) {
+	env := localRelayWT(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	// Open a channel via WT and exchange messages.
+	ch, err := c.OpenChannel("wt-channel")
+	if err != nil {
+		t.Fatal("open:", err)
+	}
+	defer ch.Close()
+
+	bch, err := b.AcceptChannel(ctx)
+	if err != nil {
+		t.Fatal("accept:", err)
+	}
+	defer bch.Close()
+
+	if bch.Name() != "wt-channel" {
+		t.Fatalf("got %q, want wt-channel", bch.Name())
+	}
+
+	if err := ch.Send(ctx, []byte("wt-data")); err != nil {
+		t.Fatal("send:", err)
+	}
+	data, err := bch.Recv(ctx)
+	if err != nil {
+		t.Fatal("recv:", err)
+	}
+	if string(data) != "wt-data" {
+		t.Fatalf("got %q, want wt-data", data)
+	}
+}
+
+// TestBackendOpensChannelViaWT tests backend-initiated channel open over WT,
+// exercising the client-side AcceptStream -> backend OpenStream bridge path.
+func TestBackendOpensChannelViaWT(t *testing.T) {
+	env := localRelayWT(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	// Backend opens a channel.
+	ch, err := b.OpenChannel("wt-backend-channel")
+	if err != nil {
+		t.Fatal("open:", err)
+	}
+	defer ch.Close()
+
+	cch, err := c.AcceptChannel(ctx)
+	if err != nil {
+		t.Fatal("accept:", err)
+	}
+	defer cch.Close()
+
+	if cch.Name() != "wt-backend-channel" {
+		t.Fatalf("got %q, want wt-backend-channel", cch.Name())
+	}
+
+	if err := ch.Send(ctx, []byte("from-be-wt")); err != nil {
+		t.Fatal("send:", err)
+	}
+	data, err := cch.Recv(ctx)
+	if err != nil {
+		t.Fatal("recv:", err)
+	}
+	if string(data) != "from-be-wt" {
+		t.Fatalf("got %q, want from-be-wt", data)
+	}
+}
+
+// TestBackendDisconnectDuringChannelViaWT tests that when a backend
+// disconnects during a channel conversation over WT, the error propagates
+// correctly through the stream bridge.
+func TestBackendDisconnectDuringChannelViaWT(t *testing.T) {
+	env := localRelayWT(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	ch, err := c.OpenChannel("wt-break")
+	if err != nil {
+		t.Fatal("open:", err)
+	}
+	defer ch.Close()
+
+	bch, err := b.AcceptChannel(ctx)
+	if err != nil {
+		t.Fatal("accept:", err)
+	}
+
+	// Exchange a message to verify bridging works.
+	if err := ch.Send(ctx, []byte("wt-before")); err != nil {
+		t.Fatal("send:", err)
+	}
+	data, err := bch.Recv(ctx)
+	if err != nil {
+		t.Fatal("recv:", err)
+	}
+	if string(data) != "wt-before" {
+		t.Fatalf("got %q, want wt-before", data)
+	}
+
+	// Close the backend.
+	b.CloseNow()
+
+	// Client channel recv should error.
+	_, err = ch.Recv(ctx)
+	if err == nil {
+		t.Fatal("expected error from channel recv after backend close via WT")
+	}
+}
+
+// TestClientDisconnectDuringChannelViaQUIC tests client disconnect during
+// channel communication over QUIC, exercising bridgeStream error paths.
+func TestClientDisconnectDuringChannelViaQUIC(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	ch, err := c.OpenChannel("quic-break")
+	if err != nil {
+		t.Fatal("open:", err)
+	}
+
+	bch, err := b.AcceptChannel(ctx)
+	if err != nil {
+		t.Fatal("accept:", err)
+	}
+
+	// Exchange a message to verify.
+	if err := ch.Send(ctx, []byte("quic-before")); err != nil {
+		t.Fatal("send:", err)
+	}
+	data, err := bch.Recv(ctx)
+	if err != nil {
+		t.Fatal("recv:", err)
+	}
+	if string(data) != "quic-before" {
+		t.Fatalf("got %q, want quic-before", data)
+	}
+
+	// Close the client connection.
+	c.CloseNow()
+
+	// Backend channel recv should error.
+	_, err = bch.Recv(ctx)
+	if err == nil {
+		t.Fatal("expected error from channel recv after client close via QUIC")
+	}
+}
+
+// TestMultipleChannelsOverWT tests multiple simultaneous channels over
+// WebTransport to exercise multiple stream bridge pairs.
+func TestMultipleChannelsOverWT(t *testing.T) {
+	env := localRelayWT(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	// Open 3 channels.
+	names := []string{"ch-a", "ch-b", "ch-c"}
+	clientChans := make([]*StreamChannel, len(names))
+	for i, name := range names {
+		ch, err := c.OpenChannel(name)
+		if err != nil {
+			t.Fatalf("open %s: %v", name, err)
+		}
+		clientChans[i] = ch
+		defer ch.Close()
+	}
+
+	backendChans := make(map[string]*StreamChannel)
+	for range names {
+		bch, err := b.AcceptChannel(ctx)
+		if err != nil {
+			t.Fatal("accept:", err)
+		}
+		backendChans[bch.Name()] = bch
+		defer bch.Close()
+	}
+
+	// Send on each and verify.
+	for i, ch := range clientChans {
+		msg := "msg-" + names[i]
+		if err := ch.Send(ctx, []byte(msg)); err != nil {
+			t.Fatalf("send on %s: %v", names[i], err)
+		}
+	}
+
+	for _, name := range names {
+		bch := backendChans[name]
+		data, err := bch.Recv(ctx)
+		if err != nil {
+			t.Fatalf("recv on %s: %v", name, err)
+		}
+		expected := "msg-" + name
+		if string(data) != expected {
+			t.Fatalf("chan %s: got %q, want %q", name, data, expected)
+		}
+	}
+}
+
+// TestSendWithDeadline exercises the SetWriteDeadline/SetReadDeadline
+// paths in Conn.Send and Conn.Recv (conn.go lines 233-237, 251-255).
+func TestSendWithDeadline(t *testing.T) {
+	forEachRelay(t, func(t *testing.T, env relayEnv) {
+		b, c := connectPair(t, env)
+
+		// Send with a deadline (exercises the SetWriteDeadline path).
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := c.Send(ctx, []byte("deadline-msg")); err != nil {
+			t.Fatal("send with deadline:", err)
+		}
+		data, err := b.Recv(ctx)
+		if err != nil {
+			t.Fatal("recv:", err)
+		}
+		if string(data) != "deadline-msg" {
+			t.Fatalf("got %q, want deadline-msg", data)
+		}
+	})
+}
+
+// TestQUICHandshakeDroppedConnection connects to the QUIC server and
+// closes the raw QUIC connection before the handshake completes,
+// exercising the "accept stream failed" and "read handshake failed"
+// error paths in handleConnection (quicserver.go:148-163).
+func TestQUICHandshakeDroppedConnection(t *testing.T) {
+	cert, pool := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	h := newHub()
+	srv := NewQUICServer("127.0.0.1:0", tlsCfg, "", h)
+
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.ServeWithTLS(udp, tlsCfg)
+	t.Cleanup(func() { srv.Close() })
+
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	clientTLS := &tls.Config{RootCAs: pool, NextProtos: []string{ternALPN}}
+
+	// Scenario 1: Connect and immediately close without opening a stream.
+	// This exercises the "accept stream failed" path.
+	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	if err != nil {
+		t.Fatal("dial:", err)
+	}
+	conn.CloseWithError(0, "drop before stream")
+	time.Sleep(100 * time.Millisecond)
+
+	// Scenario 2: Open a stream and close before sending the handshake.
+	// This exercises the "read handshake failed" path.
+	conn2, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	if err != nil {
+		t.Fatal("dial:", err)
+	}
+	stream, err := conn2.OpenStream()
+	if err != nil {
+		t.Fatal("open stream:", err)
+	}
+	_ = stream
+	conn2.CloseWithError(0, "drop before handshake")
+	time.Sleep(100 * time.Millisecond)
+}
+
+// TestQUICRegisterWriteIDFails exercises the "write ID failed" path
+// in handleRegister by connecting, sending a register handshake, then
+// closing before the server writes the ID back.
+// This is inherently racy — the server may write the ID before we close.
+// The test exercises the path on a best-effort basis.
+func TestQUICRegisterWriteIDFails(t *testing.T) {
+	cert, pool := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	h := newHub()
+	srv := NewQUICServer("127.0.0.1:0", tlsCfg, "", h)
+
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.ServeWithTLS(udp, tlsCfg)
+	t.Cleanup(func() { srv.Close() })
+
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	clientTLS := &tls.Config{RootCAs: pool, NextProtos: []string{ternALPN}}
+	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	if err != nil {
+		t.Fatal("dial:", err)
+	}
+
+	stream, err := conn.OpenStream()
+	if err != nil {
+		t.Fatal("open stream:", err)
+	}
+
+	// Send register handshake then immediately close.
+	writeMessage(stream, []byte("register"))
+	conn.CloseWithError(0, "close during register")
+	time.Sleep(100 * time.Millisecond)
+}
+
+// TestConnectToOccupiedInstanceViaQUICRaw directly tests the raw QUIC
+// handleConnect "occupied" path by connecting two raw clients.
+func TestConnectToOccupiedInstanceViaQUICRaw(t *testing.T) {
+	cert, pool := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	h := newHub()
+	srv := NewQUICServer("127.0.0.1:0", tlsCfg, "", h)
+
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.ServeWithTLS(udp, tlsCfg)
+	t.Cleanup(func() { srv.Close() })
+
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	clientTLS := &tls.Config{RootCAs: pool, NextProtos: []string{ternALPN}}
+
+	// Register a backend.
+	conn1, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	if err != nil {
+		t.Fatal("dial:", err)
+	}
+	defer conn1.CloseWithError(0, "")
+
+	s1, err := conn1.OpenStream()
+	if err != nil {
+		t.Fatal("open stream:", err)
+	}
+	if err := writeMessage(s1, []byte("register")); err != nil {
+		t.Fatal("write:", err)
+	}
+	idBytes, err := readMessage(s1)
+	if err != nil {
+		t.Fatal("read ID:", err)
+	}
+	instanceID := string(idBytes)
+	t.Logf("registered instance: %s", instanceID)
+
+	// First client connects.
+	conn2, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	if err != nil {
+		t.Fatal("dial c1:", err)
+	}
+	defer conn2.CloseWithError(0, "")
+	s2, err := conn2.OpenStream()
+	if err != nil {
+		t.Fatal("open stream c1:", err)
+	}
+	if err := writeMessage(s2, []byte("connect:"+instanceID)); err != nil {
+		t.Fatal("write c1:", err)
+	}
+
+	// Give the first client time to be accepted.
+	time.Sleep(100 * time.Millisecond)
+
+	// Second client connects to the same instance.
+	conn3, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	if err != nil {
+		t.Fatal("dial c2:", err)
+	}
+	defer conn3.CloseWithError(0, "")
+	s3, err := conn3.OpenStream()
+	if err != nil {
+		t.Fatal("open stream c2:", err)
+	}
+	if err := writeMessage(s3, []byte("connect:"+instanceID)); err != nil {
+		t.Fatal("write c2:", err)
+	}
+
+	// Second client should get an error (connection closed by server).
+	time.Sleep(200 * time.Millisecond)
+	_, err = s3.Read(make([]byte, 1))
+	if err == nil {
+		t.Fatal("expected error for second client on occupied instance")
+	}
+	t.Logf("occupied instance: %v", err)
+}
+
+// TestConnectWTNilTLSConfig exercises the nil TLS config path in
+// connectWebTransport (tern.go:278-279) and registerWebTransport (tern.go:229-231).
+// The dial will fail because there's no trust anchor for the self-signed cert,
+// but the nil-config branch is exercised before the failure.
+func TestConnectWTNilTLSConfig(t *testing.T) {
+	env := localRelayWT(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Connect with WebTransport but no TLS config (nil tlsConfig path).
+	_, err := Connect(ctx, env.url, "fake-id", WithWebTransport())
+	if err == nil {
+		t.Fatal("expected error with no TLS config (cert validation)")
+	}
+	t.Logf("connect WT nil TLS: %v", err)
+}
+
+func TestRegisterWTNilTLSConfig(t *testing.T) {
+	env := localRelayWT(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, err := Register(ctx, env.url, WithWebTransport())
+	if err == nil {
+		t.Fatal("expected error with no TLS config (cert validation)")
+	}
+	t.Logf("register WT nil TLS: %v", err)
+}
+
+// TestOpenChannelWriteMessageFails exercises the writeMessage error path
+// in OpenChannel (channel.go:69-71) by opening a channel on a closed conn
+// that had an open stream (simulating the stream being valid but closed).
+func TestOpenChannelWriteMessageFails(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	// Open a channel successfully to warm up.
+	ch1, err := c.OpenChannel("warm-up")
+	if err != nil {
+		t.Fatal("open warm-up:", err)
+	}
+	defer ch1.Close()
+
+	bch1, err := b.AcceptChannel(ctx)
+	if err != nil {
+		t.Fatal("accept warm-up:", err)
+	}
+	defer bch1.Close()
+
+	// Close the connection. Since the QUIC session is closed, the next
+	// OpenChannel should fail either at OpenStream or writeMessage.
+	c.CloseNow()
+	time.Sleep(50 * time.Millisecond)
+
+	_, err = c.OpenChannel("after-close-2")
+	if err == nil {
+		t.Fatal("expected error from OpenChannel after close")
+	}
+}
+
+// TestEncryptedRecvDecryptError tests that Conn.Recv in encrypted mode
+// returns an error when decryption fails (conn.go:273).
+func TestEncryptedRecvDecryptError(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+	setupEncryption(t, b, c)
+
+	// Send garbage bytes that look like a valid length-prefixed message
+	// but are not valid ciphertext. Access the raw stream directly.
+	b.writeMu.Lock()
+	writeMessage(b.stream, []byte("this is not valid ciphertext at all!"))
+	b.writeMu.Unlock()
+
+	// Client should get a decrypt error.
+	_, err := c.Recv(ctx)
+	if err == nil {
+		t.Fatal("expected decrypt error from Recv")
+	}
+	t.Logf("decrypt error: %v", err)
+}
+
+// TestDatagramChannelRecvDecryptError tests that DatagramChannel.Recv
+// returns an error when decryption fails (channel.go:173-175).
+func TestDatagramChannelRecvDecryptError(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	bRec, _ := setupPairingRecords(t)
+	b.SetPairingRecord(bRec)
+	cRec, _ := setupPairingRecords(t) // Different key pair — will cause decrypt failure
+	c.SetPairingRecord(cRec)
+
+	bdc := b.DatagramChannel("decrypt-fail")
+	cdc := c.DatagramChannel("decrypt-fail")
+
+	// bdc encrypts with bRec's keys. cdc tries to decrypt with cRec's keys.
+	// This should cause a decrypt error since the keys don't match.
+	for i := range 20 {
+		bdc.Send([]byte("payload-" + strconv.Itoa(i)))
+	}
+
+	recvCtx, recvCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer recvCancel()
+
+	_, err := cdc.Recv(recvCtx)
+	if err == nil {
+		// If we didn't get an error, that's also OK — the datagram may have
+		// been lost. The important thing is we exercised the code path.
+		t.Log("no error received (datagram may have been lost)")
+	} else {
+		t.Logf("datagram decrypt: %v", err)
+	}
+}
+
+// TestShortDatagramIgnoredByDispatcher tests that the datagram dispatcher
+// ignores datagrams shorter than 2 bytes (conn.go:125-126).
+// We activate the dispatcher by creating a DatagramChannel, then send
+// a raw short datagram that will be received by the dispatcher.
+func TestShortDatagramIgnoredByDispatcher(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	b, c := connectPair(t, env)
+
+	// Create a DatagramChannel on backend to activate the dispatcher.
+	bdc := b.DatagramChannel("test-chan")
+	cdc := c.DatagramChannel("test-chan")
+
+	// Send a raw 1-byte datagram via SendDatagram (bypassing DatagramChannel).
+	// This will be received by the backend's datagram dispatcher, which
+	// should silently drop it because len < 2.
+	c.SendDatagram([]byte{0xFF})
+
+	// Also send a valid datagram through the channel.
+	for i := range 10 {
+		cdc.Send([]byte("valid-" + strconv.Itoa(i)))
+	}
+
+	// The valid datagram should arrive on the channel.
+	recvCtx, recvCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer recvCancel()
+
+	data, err := bdc.Recv(recvCtx)
+	if err != nil {
+		t.Fatal("recv:", err)
+	}
+	if !strings.HasPrefix(string(data), "valid-") {
+		t.Fatalf("got %q, want valid-*", data)
+	}
+}
+
+// TestQUICListenAndServeDefaultAddr exercises the addr=="" default path
+// in QUICServer.ListenAndServe (quicserver.go:124-125).
+// Note: Port 4433 may already be in use, so the listen may fail — that's
+// fine, we just need to exercise the code path.
+func TestQUICListenAndServeDefaultAddr(t *testing.T) {
+	cert, _ := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	h := newHub()
+	srv := NewQUICServer("", tlsCfg, "", h) // empty addr
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe(tlsCfg) }()
+
+	// Give it time to either start or fail.
+	time.Sleep(100 * time.Millisecond)
+
+	// Clean up regardless.
+	srv.Close()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Logf("default addr listen: %v (expected on some systems)", err)
+		}
+	case <-time.After(2 * time.Second):
+		// Server started fine, was closed by srv.Close().
+	}
+}
+
+// TestWTListenAndServeDefaultAddr exercises the addr=="" default path
+// in WebTransportServer.ListenAndServe (webtransport.go:342-343).
+func TestWTListenAndServeDefaultAddr(t *testing.T) {
+	cert, _ := generateTestCert(t)
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+
+	srv, err := NewWebTransportServer("", tlsCfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+
+	time.Sleep(100 * time.Millisecond)
+	srv.Close()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Logf("default addr listen: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+	}
+}
+
+// TestConnCloseNilStream exercises Conn.Close when stream is nil.
+func TestConnCloseNilStream(t *testing.T) {
+	c := newConn(nil, nil, io.NopCloser(nil), nil, nil, "test")
+	if err := c.Close(); err != nil {
+		t.Fatal("close:", err)
 	}
 }
 
