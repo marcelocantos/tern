@@ -10,7 +10,7 @@ The pre-1.0 period (currently v0.x.x) exists to get the interaction surface righ
 
 ## Interaction Surface Catalogue
 
-*Snapshot as of v0.7.0.*
+*Snapshot as of v0.8.0.*
 
 ### Relay API (the binary's external interface)
 
@@ -21,10 +21,11 @@ The pre-1.0 period (currently v0.x.x) exists to get the interaction surface righ
 | `GET /ws/{id}` | WebTransport (QUIC) | Bridged bidirectionally (streams + datagrams) to registered backend |
 
 Supports both reliable streams (via `Send`/`Recv`) and unreliable datagrams (via `SendDatagram`/`RecvDatagram`).
+Relay bridges additional streams opened by either side (for channel API).
 
 Constraints: one client per instance; second client returns HTTP 409.
 Max message frame size: 1 MiB.
-CORS: origin check disabled (intentional default).
+CORS: `Access-Control-Allow-Origin: *` on health endpoint (for browser Alt-Svc priming).
 
 *Stability: Stable.*
 
@@ -71,14 +72,32 @@ func (c *Conn) SendDatagram(data []byte) error
 func (c *Conn) RecvDatagram(ctx context.Context) ([]byte, error)
 func (c *Conn) SetChannel(ch *crypto.Channel)
 func (c *Conn) SetDatagramChannel(ch *crypto.Channel)
+func (c *Conn) SetPairingRecord(rec *crypto.PairingRecord)
+func (c *Conn) OpenChannel(name string) (*StreamChannel, error)
+func (c *Conn) AcceptChannel(ctx context.Context) (*StreamChannel, error)
+func (c *Conn) DatagramChannel(name string) *DatagramChannel
 func (c *Conn) Close() error
 func (c *Conn) CloseNow() error
+
+// StreamChannel type
+type StreamChannel struct { /* unexported fields */ }
+func (sc *StreamChannel) Name() string
+func (sc *StreamChannel) Send(ctx context.Context, data []byte) error
+func (sc *StreamChannel) Recv(ctx context.Context) ([]byte, error)
+func (sc *StreamChannel) Close() error
+
+// DatagramChannel type
+type DatagramChannel struct { /* unexported fields */ }
+func (dc *DatagramChannel) Send(data []byte) error
+func (dc *DatagramChannel) Recv(ctx context.Context) ([]byte, error)
+
 // Connection options
 type Option func(*options)
 func WithToken(token string) Option
 func WithTLS(tlsConfig *tls.Config) Option
 func WithWebTransport() Option
 func WithQUICPort(port string) Option
+func WithInstanceID(id string) Option
 
 // Client-side connectivity
 func Register(ctx context.Context, relayURL string, opts ...Option) (*Conn, error)
@@ -140,6 +159,20 @@ func NewDatagramChannel(sendKey, recvKey []byte) (*Channel, error)
 // Channel methods
 func (*Channel) Encrypt(plaintext []byte) []byte
 func (*Channel) Decrypt(data []byte) ([]byte, error)
+func (*Channel) SetMode(mode ChannelMode)
+
+// PairingRecord — persistent pairing state
+type PairingRecord struct {
+    PeerInstanceID  string `json:"peer_instance_id"`
+    RelayURL        string `json:"relay_url"`
+    LocalPrivateKey []byte `json:"local_private_key"`
+    LocalPublicKey  []byte `json:"local_public_key"`
+    PeerPublicKey   []byte `json:"peer_public_key"`
+}
+func NewPairingRecord(peerInstanceID, relayURL string, localKP *KeyPair, peerPubKey *ecdh.PublicKey) *PairingRecord
+func (*PairingRecord) DeriveChannel(sendInfo, recvInfo []byte) (*Channel, error)
+func (*PairingRecord) Marshal() ([]byte, error)
+func UnmarshalPairingRecord(data []byte) (*PairingRecord, error)
 ```
 
 *Stability: Stable — `NewSymmetricChannel` may be renamed for clarity before 1.0.*
@@ -184,6 +217,8 @@ func (*Protocol) ExportGo(w io.Writer, pkgName, funcName string) error
 func (*Protocol) ExportSwift(w io.Writer) error
 func (*Protocol) ExportTLA(w io.Writer) error
 func (*Protocol) ExportPlantUML(w io.Writer) error
+func (*Protocol) ExportKotlin(w io.Writer) error
+func (*Protocol) ExportTypeScript(w io.Writer) error
 
 // Machine runtime
 func NewMachine(p *Protocol, actorName string) (*Machine, error)
@@ -236,6 +271,12 @@ public final class E2EChannel: @unchecked Sendable {
     public enum E2EError: LocalizedError { ... }
 }
 
+// PairingRecord
+public struct PairingRecord: Codable, Sendable {
+    public init(peerInstanceID: String, relayURL: String, localKeyPair: E2EKeyPair, peerPublicKey: Data)
+    public func deriveChannel(sendInfo: Data, recvInfo: Data) throws -> E2EChannel
+}
+
 // Standalone functions
 public func deriveKeyFromSecret(_ secret: Data, info: Data) -> SymmetricKey
 
@@ -246,6 +287,35 @@ public func deriveKeyFromSecret(_ secret: Data, info: Data) -> SymmetricKey
 
 *Stability: E2EKeyPair and E2EChannel are Stable. Generated state machines are
 Needs Review — names depend on pairing.yaml actor names.*
+
+### `faultproxy/` Go package (testing only)
+
+```go
+type Proxy struct { /* unexported fields */ }
+type Profile struct { /* see source */ }
+type Option func(*Profile)
+type Action int   // Forward, Drop
+type Stats struct { /* atomic counters */ }
+
+func New(target string, opts ...Option) (*Proxy, error)
+func (*Proxy) Addr() string
+func (*Proxy) GetStats() *Stats
+func (*Proxy) PacketCount() int
+func (*Proxy) UpdateProfile(opts ...Option)
+func (*Proxy) Close() error
+
+func WithLatency(base, jitter time.Duration) Option
+func WithPacketLoss(rate float64) Option
+func WithReorder(rate float64) Option
+func WithCorrupt(rate float64) Option
+func WithBandwidth(bytesPerSec int) Option
+func WithBlackhole(duration, interval time.Duration) Option
+func WithDropAfter(n int) Option
+func WithDropWindow(start, end int) Option
+func WithPacketHook(fn func(pktNum int, data []byte) Action) Option
+```
+
+*Stability: Fluid — testing utility, API may evolve freely.*
 
 ---
 
