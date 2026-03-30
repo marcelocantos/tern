@@ -30,6 +30,11 @@ maintenance activities. Append-only — newest entries at the bottom.
   - TLA+ model for cutover protocol (🎯T10)
   - Channel API (streaming + datagram channels)
 
+## 2026-03-30 — /release v0.9.0
+
+- **Commit**: `cd8c35b`
+- **Outcome**: Released v0.9.0. Transparent large datagram fragmentation/reassembly folded into SendDatagram/RecvDatagram. 1-byte framing prefix. Homebrew formula updated.
+
 ## 2026-03-30 — /release v0.8.0
 
 - **Commit**: `e0d6555`

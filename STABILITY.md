@@ -10,7 +10,7 @@ The pre-1.0 period (currently v0.x.x) exists to get the interaction surface righ
 
 ## Interaction Surface Catalogue
 
-*Snapshot as of v0.8.0.*
+*Snapshot as of v0.9.0.*
 
 ### Relay API (the binary's external interface)
 
@@ -47,7 +47,7 @@ Build-time version injection: `-ldflags "-X main.version=<version>"`.
 
 *Stability: Stable.*
 
-### Wire format (encrypted message frame)
+### Wire format (encrypted message frame — streams)
 
 ```
 [8-byte sequence number, little-endian uint64]
@@ -57,6 +57,23 @@ Build-time version injection: `-ldflags "-X main.version=<version>"`.
 
 The sequence number doubles as both the replay-prevention counter and the
 AES-GCM nonce (first 8 bytes of the 12-byte nonce, remaining 4 bytes zero).
+
+*Stability: Stable.*
+
+### Wire format (datagram framing)
+
+Every datagram has a 1-byte prefix for type discrimination and automatic
+fragmentation of payloads exceeding the QUIC datagram frame size:
+
+```
+0x00 + payload                                — conn: whole datagram
+0x40 + frag header (8B) + chunk               — conn: fragment
+0x80 + channel ID (2B) + payload              — channel: whole datagram
+0xC0 + channel ID (2B) + frag header (8B) + chunk — channel: fragment
+```
+
+Fragment header: `[4B msg ID][2B frag index][2B total fragments]`.
+Incomplete assemblies are discarded after 5 seconds (configurable).
 
 *Stability: Stable.*
 

@@ -70,6 +70,8 @@ client.Send(ctx, ciphertext)
 data, _ := backend.Recv(ctx)
 
 // Unreliable datagrams (for latency-sensitive data like video frames).
+// Large payloads are automatically fragmented and reassembled; if any
+// fragment is lost the entire message is silently discarded.
 client.SendDatagram(data)
 data, _ = backend.RecvDatagram(ctx)
 ```
