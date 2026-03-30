@@ -83,6 +83,7 @@ func main() {
 	keyFile := flag.String("key", "", "TLS private key file (PEM)")
 	domain := flag.String("domain", "", "domain for automatic Let's Encrypt TLS (e.g. tern.fly.dev)")
 	acmeEmail := flag.String("acme-email", "", "email for Let's Encrypt account (recommended)")
+	lanAddr := flag.String("lan", "", "LAN listener address for direct connections (e.g. :0, localhost:44333)")
 	flag.Parse()
 
 	if *showVersion {
@@ -231,6 +232,17 @@ func main() {
 			slog.Error("raw QUIC server failed", "err", err)
 		}
 	}()
+
+	// Start LAN server if configured.
+	if *lanAddr != "" {
+		lanSrv, err := tern.NewLANServer(*lanAddr, tlsConfig)
+		if err != nil {
+			slog.Error("failed to start LAN server", "err", err)
+			os.Exit(1)
+		}
+		defer lanSrv.Close()
+		_ = lanSrv // TODO: wire into relay registration flow
+	}
 
 	slog.Info("tern starting",
 		"wt-addr", wtAddr,

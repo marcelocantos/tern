@@ -34,72 +34,52 @@ import (
 //go:embed agents-guide.md
 var AgentGuide string
 
-// Option configures a relay connection.
-type Option func(*options)
+// Config configures a relay connection.
+type Config struct {
+	// Token is the bearer token for authentication on /register.
+	Token string
 
-type options struct {
-	token         string
-	instanceID    string // persistent instance ID (empty = server assigns random)
-	tlsConfig     *tls.Config
-	webTransport  bool
-	quicPort      string // override the QUIC port (default: "4433")
-	lanServer     *LANServer // backend: LAN server to advertise
-	lanEnabled    bool       // client: attempt LAN upgrade
-	lanTLS        *tls.Config // client: TLS config for LAN connections
+	// InstanceID sets a persistent instance ID for registration. If set,
+	// the relay uses this ID instead of generating a random one.
+	InstanceID string
+
+	// TLS is the TLS config for the QUIC connection. Use this to trust
+	// self-signed certificates (set RootCAs or InsecureSkipVerify).
+	TLS *tls.Config
+
+	// WebTransport forces WebTransport (HTTP/3) instead of raw QUIC.
+	WebTransport bool
+
+	// QUICPort overrides the default QUIC port (4433) for raw QUIC
+	// connections.
+	QUICPort string
+
+	// LANServer, if set, advertises a local LAN listener to connecting
+	// clients. Use with Register — when SetChannel is called, the LAN
+	// address is sent to the peer via the encrypted relay channel.
+	LANServer *LANServer
+
+	// LAN enables LAN upgrade on the client side. When the backend
+	// advertises a LAN address, the client attempts a direct connection.
+	LAN bool
+
+	// LANTLS is the TLS config for LAN connections (client side).
+	// If nil and LAN is true, InsecureSkipVerify is used.
+	LANTLS *tls.Config
 }
 
-// WithToken sets the bearer token for authentication on /register.
-func WithToken(token string) Option {
-	return func(o *options) { o.token = token }
-}
-
-// WithTLS sets the TLS config for the QUIC connection. Use this to
-// trust self-signed certificates (set RootCAs or InsecureSkipVerify).
-func WithTLS(tlsConfig *tls.Config) Option {
-	return func(o *options) { o.tlsConfig = tlsConfig }
-}
-
-// WithWebTransport forces WebTransport (HTTP/3) instead of raw QUIC.
-// Use this for browser clients or when connecting to a relay that only
-// supports WebTransport.
-func WithWebTransport() Option {
-	return func(o *options) { o.webTransport = true }
-}
-
-// WithInstanceID sets a persistent instance ID for registration. If set,
-// the relay uses this ID instead of generating a random one. This enables
-// persistent pairing — clients that know the ID can reconnect across
-// reboots and network changes without re-scanning a QR code.
-func WithInstanceID(id string) Option {
-	return func(o *options) { o.instanceID = id }
-}
-
-// WithQUICPort overrides the default QUIC port (4433) for raw QUIC
-// connections. This is the port the relay's QUICServer listens on.
-func WithQUICPort(port string) Option {
-	return func(o *options) { o.quicPort = port }
-}
-
-func buildOptions(opts []Option) options {
-	var o options
-	for _, fn := range opts {
-		fn(&o)
-	}
-	return o
-}
 
 // Register connects to the relay as a backend. By default uses raw QUIC
 // (ALPN "tern"). The relay assigns an instance ID, returned via
 // InstanceID(). The caller is responsible for closing the connection.
-func Register(ctx context.Context, relayURL string, opts ...Option) (*Conn, error) {
-	o := buildOptions(opts)
+func Register(ctx context.Context, relayURL string, c Config) (*Conn, error) {
 
 	var conn *Conn
 	var err error
-	if o.webTransport {
-		conn, err = registerWebTransport(ctx, relayURL, o)
+	if c.WebTransport {
+		conn, err = registerWebTransport(ctx, relayURL, c)
 	} else {
-		conn, err = registerQUIC(ctx, relayURL, o)
+		conn, err = registerQUIC(ctx, relayURL, c)
 	}
 	if err != nil {
 		return nil, err
@@ -109,9 +89,9 @@ func Register(ctx context.Context, relayURL string, opts ...Option) (*Conn, erro
 	// channel is established. The offer is sent once the caller sets
 	// up encryption (SetChannel) and calls Send/Recv. We store the
 	// server for deferred advertisement.
-	if o.lanServer != nil {
+	if c.LANServer != nil {
 		conn.mu.Lock()
-		conn.lanServer = o.lanServer
+		conn.lanServer = c.LANServer
 		conn.mu.Unlock()
 	}
 
@@ -120,24 +100,23 @@ func Register(ctx context.Context, relayURL string, opts ...Option) (*Conn, erro
 
 // Connect connects to a relay as a client targeting a specific backend
 // instance ID. By default uses raw QUIC (ALPN "tern").
-func Connect(ctx context.Context, relayURL, instanceID string, opts ...Option) (*Conn, error) {
-	o := buildOptions(opts)
+func Connect(ctx context.Context, relayURL, instanceID string, c Config) (*Conn, error) {
 
 	var conn *Conn
 	var err error
-	if o.webTransport {
-		conn, err = connectWebTransport(ctx, relayURL, instanceID, o)
+	if c.WebTransport {
+		conn, err = connectWebTransport(ctx, relayURL, instanceID, c)
 	} else {
-		conn, err = connectQUIC(ctx, relayURL, instanceID, o)
+		conn, err = connectQUIC(ctx, relayURL, instanceID, c)
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	if o.lanEnabled {
+	if c.LAN {
 		conn.mu.Lock()
 		conn.lanEnabled = true
-		conn.lanTLS = o.lanTLS
+		conn.lanTLS = c.LANTLS
 		conn.mu.Unlock()
 	}
 
@@ -146,8 +125,8 @@ func Connect(ctx context.Context, relayURL, instanceID string, opts ...Option) (
 
 // --- Raw QUIC client ---
 
-func quicTLSConfig(o options) *tls.Config {
-	cfg := o.tlsConfig
+func quicTLSConfig(c Config) *tls.Config {
+	cfg := c.TLS
 	if cfg == nil {
 		cfg = &tls.Config{}
 	} else {
@@ -159,26 +138,26 @@ func quicTLSConfig(o options) *tls.Config {
 
 // quicAddr derives the raw QUIC address from a relay URL. The default
 // QUIC port is 4433 unless overridden by WithQUICPort.
-func quicAddr(relayURL string, o options) (string, error) {
+func quicAddr(relayURL string, c Config) (string, error) {
 	u, err := url.Parse(relayURL)
 	if err != nil {
 		return "", fmt.Errorf("parse relay URL: %w", err)
 	}
 	host := u.Hostname()
-	port := o.quicPort
+	port := c.QUICPort
 	if port == "" {
 		port = "4433"
 	}
 	return host + ":" + port, nil
 }
 
-func registerQUIC(ctx context.Context, relayURL string, o options) (*Conn, error) {
-	addr, err := quicAddr(relayURL, o)
+func registerQUIC(ctx context.Context, relayURL string, c Config) (*Conn, error) {
+	addr, err := quicAddr(relayURL, c)
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := quic.DialAddr(ctx, addr, quicTLSConfig(o), &quic.Config{EnableDatagrams: true})
+	conn, err := quic.DialAddr(ctx, addr, quicTLSConfig(c), &quic.Config{EnableDatagrams: true})
 	if err != nil {
 		return nil, fmt.Errorf("register: quic dial: %w", err)
 	}
@@ -191,8 +170,8 @@ func registerQUIC(ctx context.Context, relayURL string, o options) (*Conn, error
 
 	// Send handshake: "register[:TOKEN[:INSTANCE_ID]]"
 	handshake := "register"
-	if o.token != "" || o.instanceID != "" {
-		handshake = "register:" + o.token + ":" + o.instanceID
+	if c.Token != "" || c.InstanceID != "" {
+		handshake = "register:" + c.Token + ":" + c.InstanceID
 	}
 	if err := writeMessage(stream, []byte(handshake)); err != nil {
 		conn.CloseWithError(0, "failed to send handshake")
@@ -210,13 +189,13 @@ func registerQUIC(ctx context.Context, relayURL string, o options) (*Conn, error
 	return newConn(stream, conn, closer, quicOpener{conn}, quicAcceptor{conn}, string(idBytes)), nil
 }
 
-func connectQUIC(ctx context.Context, relayURL, instanceID string, o options) (*Conn, error) {
-	addr, err := quicAddr(relayURL, o)
+func connectQUIC(ctx context.Context, relayURL, instanceID string, c Config) (*Conn, error) {
+	addr, err := quicAddr(relayURL, c)
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := quic.DialAddr(ctx, addr, quicTLSConfig(o), &quic.Config{EnableDatagrams: true})
+	conn, err := quic.DialAddr(ctx, addr, quicTLSConfig(c), &quic.Config{EnableDatagrams: true})
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: quic dial: %w", instanceID, err)
 	}
@@ -261,8 +240,8 @@ func (a quicAcceptor) AcceptStream(ctx context.Context) (io.ReadWriteCloser, err
 
 // --- WebTransport client (for browsers / backward compat) ---
 
-func registerWebTransport(ctx context.Context, relayURL string, o options) (*Conn, error) {
-	tlsConfig := o.tlsConfig
+func registerWebTransport(ctx context.Context, relayURL string, c Config) (*Conn, error) {
+	tlsConfig := c.TLS
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{}
 	}
@@ -272,8 +251,8 @@ func registerWebTransport(ctx context.Context, relayURL string, o options) (*Con
 	}
 
 	hdr := http.Header{}
-	if o.token != "" {
-		hdr.Set("Authorization", "Bearer "+o.token)
+	if c.Token != "" {
+		hdr.Set("Authorization", "Bearer "+c.Token)
 	}
 
 	_, session, err := d.Dial(ctx, relayURL+"/register", hdr)
@@ -290,8 +269,8 @@ func registerWebTransport(ctx context.Context, relayURL string, o options) (*Con
 
 	// Send a handshake to trigger the stream header.
 	handshake := "register"
-	if o.instanceID != "" {
-		handshake = "register::" + o.instanceID
+	if c.InstanceID != "" {
+		handshake = "register::" + c.InstanceID
 	}
 	if err := writeMessage(stream, []byte(handshake)); err != nil {
 		session.CloseWithError(0, "failed to send handshake")
@@ -309,8 +288,8 @@ func registerWebTransport(ctx context.Context, relayURL string, o options) (*Con
 	return newConn(stream, session, closer, wtOpener{session}, wtAcceptor{session}, string(idBytes)), nil
 }
 
-func connectWebTransport(ctx context.Context, relayURL, instanceID string, o options) (*Conn, error) {
-	tlsConfig := o.tlsConfig
+func connectWebTransport(ctx context.Context, relayURL, instanceID string, c Config) (*Conn, error) {
+	tlsConfig := c.TLS
 	if tlsConfig == nil {
 		tlsConfig = &tls.Config{}
 	}

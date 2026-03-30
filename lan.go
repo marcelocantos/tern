@@ -54,9 +54,15 @@ type pendingLAN struct {
 	conn      *Conn // the relay Conn to upgrade
 }
 
-// NewLANServer creates a LAN QUIC listener on a random port. If
-// tlsConfig is nil, a self-signed certificate is generated.
-func NewLANServer(tlsConfig *tls.Config) (*LANServer, error) {
+// NewLANServer creates a LAN QUIC listener. The addr parameter
+// specifies the listen address (e.g., ":0" for a random port,
+// "localhost:44333" for a fixed address). If addr is empty, ":0"
+// is used. If tlsConfig is nil, a self-signed certificate is generated.
+func NewLANServer(addr string, tlsConfig *tls.Config) (*LANServer, error) {
+	if addr == "" {
+		addr = ":0"
+	}
+
 	if tlsConfig == nil {
 		cert, err := generateSelfSigned()
 		if err != nil {
@@ -71,25 +77,31 @@ func NewLANServer(tlsConfig *tls.Config) (*LANServer, error) {
 		tlsConfig.NextProtos = []string{"tern-lan"}
 	}
 
-	listener, err := quic.ListenAddr("0.0.0.0:0", tlsConfig, &quic.Config{
+	listener, err := quic.ListenAddr(addr, tlsConfig, &quic.Config{
 		EnableDatagrams: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("LAN listen: %w", err)
 	}
 
-	port := listener.Addr().(*net.UDPAddr).Port
-	addr := fmt.Sprintf("%s:%d", qr.LanIP(), port)
+	// Determine the advertised address. If the listen address doesn't
+	// specify a host (e.g., ":0" or ":44333"), use the LAN IP.
+	listenAddr := listener.Addr().(*net.UDPAddr)
+	host := listenAddr.IP.String()
+	if listenAddr.IP.IsUnspecified() {
+		host = qr.LanIP()
+	}
+	advertised := fmt.Sprintf("%s:%d", host, listenAddr.Port)
 
 	s := &LANServer{
 		listener: listener,
-		addr:     addr,
+		addr:     advertised,
 		conns:    make(map[string]*pendingLAN),
 	}
 
 	go s.acceptLoop()
 
-	slog.Info("LAN server started", "addr", addr)
+	slog.Info("LAN server started", "addr", advertised)
 	return s, nil
 }
 
@@ -204,22 +216,6 @@ type lanVerify struct {
 }
 
 // --- Conn integration ---
-
-// WithLANServer configures a Conn to advertise the given LANServer
-// to connecting clients. Use with Register.
-func WithLANServer(s *LANServer) Option {
-	return func(o *options) { o.lanServer = s }
-}
-
-// WithLAN enables LAN upgrade on the client side. When the backend
-// advertises a LAN address, the client attempts a direct connection.
-// If tlsConfig is nil, InsecureSkipVerify is used.
-func WithLAN(tlsConfig *tls.Config) Option {
-	return func(o *options) {
-		o.lanEnabled = true
-		o.lanTLS = tlsConfig
-	}
-}
 
 // advertiseLAN sends the LAN offer to the peer via the encrypted
 // relay channel. Called automatically after Register when WithLANServer
