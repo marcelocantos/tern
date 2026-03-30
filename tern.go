@@ -43,6 +43,9 @@ type options struct {
 	tlsConfig     *tls.Config
 	webTransport  bool
 	quicPort      string // override the QUIC port (default: "4433")
+	lanServer     *LANServer // backend: LAN server to advertise
+	lanEnabled    bool       // client: attempt LAN upgrade
+	lanTLS        *tls.Config // client: TLS config for LAN connections
 }
 
 // WithToken sets the bearer token for authentication on /register.
@@ -91,10 +94,28 @@ func buildOptions(opts []Option) options {
 func Register(ctx context.Context, relayURL string, opts ...Option) (*Conn, error) {
 	o := buildOptions(opts)
 
+	var conn *Conn
+	var err error
 	if o.webTransport {
-		return registerWebTransport(ctx, relayURL, o)
+		conn, err = registerWebTransport(ctx, relayURL, o)
+	} else {
+		conn, err = registerQUIC(ctx, relayURL, o)
 	}
-	return registerQUIC(ctx, relayURL, o)
+	if err != nil {
+		return nil, err
+	}
+
+	// If a LAN server is configured, advertise it after the relay
+	// channel is established. The offer is sent once the caller sets
+	// up encryption (SetChannel) and calls Send/Recv. We store the
+	// server for deferred advertisement.
+	if o.lanServer != nil {
+		conn.mu.Lock()
+		conn.lanServer = o.lanServer
+		conn.mu.Unlock()
+	}
+
+	return conn, nil
 }
 
 // Connect connects to a relay as a client targeting a specific backend
@@ -102,10 +123,25 @@ func Register(ctx context.Context, relayURL string, opts ...Option) (*Conn, erro
 func Connect(ctx context.Context, relayURL, instanceID string, opts ...Option) (*Conn, error) {
 	o := buildOptions(opts)
 
+	var conn *Conn
+	var err error
 	if o.webTransport {
-		return connectWebTransport(ctx, relayURL, instanceID, o)
+		conn, err = connectWebTransport(ctx, relayURL, instanceID, o)
+	} else {
+		conn, err = connectQUIC(ctx, relayURL, instanceID, o)
 	}
-	return connectQUIC(ctx, relayURL, instanceID, o)
+	if err != nil {
+		return nil, err
+	}
+
+	if o.lanEnabled {
+		conn.mu.Lock()
+		conn.lanEnabled = true
+		conn.lanTLS = o.lanTLS
+		conn.mu.Unlock()
+	}
+
+	return conn, nil
 }
 
 // --- Raw QUIC client ---

@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"math/big"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/marcelocantos/tern/crypto"
@@ -23,50 +24,43 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-// lanOffer is sent via the encrypted relay channel to advertise a
-// direct LAN address.
-type lanOffer struct {
-	Addr      string `json:"addr"`      // host:port of the LAN QUIC listener
-	Challenge []byte `json:"challenge"` // 32-byte random challenge for verification
+// LANServer is a local QUIC listener that accepts direct connections
+// from clients on the same LAN. It is the local counterpart of the
+// relay server — same protocol, no relay in between.
+//
+// The backend creates a LANServer at startup. When a client connects
+// via the relay, the backend's Conn advertises the LAN address. The
+// client attempts a direct connection; if successful, the Conn
+// transparently switches to the LAN path.
+//
+// Usage:
+//
+//	lan, _ := tern.NewLANServer(tlsConfig)  // random port
+//	defer lan.Close()
+//
+//	// Register with the relay, passing the LAN server.
+//	b, _ := tern.Register(ctx, relayURL, tern.WithLANServer(lan))
+//	// The LAN address is automatically advertised to connecting clients.
+type LANServer struct {
+	listener *quic.Listener
+	addr     string // "ip:port" on the LAN
+	mu       sync.Mutex
+	conns    map[string]*pendingLAN // instance ID → pending connection
 }
 
-// lanVerify is sent on the direct LAN connection to prove the peer
-// is the same entity from the relay session.
-type lanVerify struct {
-	Challenge []byte `json:"challenge"` // echo back the challenge from the offer
-	InstanceID string `json:"instance_id"`
+// pendingLAN tracks a client that should connect via LAN.
+type pendingLAN struct {
+	challenge []byte
+	conn      *Conn // the relay Conn to upgrade
 }
 
-// EnableLAN enables automatic LAN upgrade on a Conn. When both peers
-// are on the same LAN, traffic transparently switches to a direct
-// QUIC connection, bypassing the relay.
-//
-// For the backend (the side that called Register), EnableLAN starts a
-// local QUIC listener and advertises the address via the relay. For
-// the client (the side that called Connect), EnableLAN watches for
-// LAN offers and attempts direct connections.
-//
-// The tlsConfig must contain a certificate for the LAN listener
-// (backend) or trust settings for the LAN connection (client). If nil,
-// a self-signed certificate is generated and InsecureSkipVerify is
-// used (suitable for development).
-//
-// Call after SetChannel — LAN offers are sent via the encrypted
-// primary stream.
-func (c *Conn) EnableLAN(ctx context.Context, isBackend bool, tlsConfig *tls.Config) error {
-	if isBackend {
-		return c.startLANBackend(ctx, tlsConfig)
-	}
-	return c.startLANClient(ctx, tlsConfig)
-}
-
-// startLANBackend starts a QUIC listener on the LAN and advertises
-// it to the peer via the relay channel.
-func (c *Conn) startLANBackend(ctx context.Context, tlsConfig *tls.Config) error {
+// NewLANServer creates a LAN QUIC listener on a random port. If
+// tlsConfig is nil, a self-signed certificate is generated.
+func NewLANServer(tlsConfig *tls.Config) (*LANServer, error) {
 	if tlsConfig == nil {
 		cert, err := generateSelfSigned()
 		if err != nil {
-			return fmt.Errorf("generate LAN cert: %w", err)
+			return nil, fmt.Errorf("generate LAN cert: %w", err)
 		}
 		tlsConfig = &tls.Config{
 			Certificates: []tls.Certificate{cert},
@@ -77,51 +71,70 @@ func (c *Conn) startLANBackend(ctx context.Context, tlsConfig *tls.Config) error
 		tlsConfig.NextProtos = []string{"tern-lan"}
 	}
 
-	// Listen on all interfaces, random port.
 	listener, err := quic.ListenAddr("0.0.0.0:0", tlsConfig, &quic.Config{
 		EnableDatagrams: true,
 	})
 	if err != nil {
-		return fmt.Errorf("LAN listen: %w", err)
+		return nil, fmt.Errorf("LAN listen: %w", err)
 	}
 
-	addr := listener.Addr().(*net.UDPAddr)
-	lanAddr := fmt.Sprintf("%s:%d", qr.LanIP(), addr.Port)
+	port := listener.Addr().(*net.UDPAddr).Port
+	addr := fmt.Sprintf("%s:%d", qr.LanIP(), port)
 
-	// Generate a challenge for verifying the direct connection.
-	challenge := make([]byte, 32)
-	if _, err := rand.Read(challenge); err != nil {
-		listener.Close()
-		return err
+	s := &LANServer{
+		listener: listener,
+		addr:     addr,
+		conns:    make(map[string]*pendingLAN),
 	}
 
-	slog.Info("LAN listener started", "addr", lanAddr)
+	go s.acceptLoop()
 
-	// Send the LAN offer via the encrypted relay channel.
-	offer := lanOffer{Addr: lanAddr, Challenge: challenge}
-	if err := c.sendControl(msgLANOffer, offer); err != nil {
-		listener.Close()
-		return fmt.Errorf("send LAN offer: %w", err)
-	}
-
-	// Accept direct connections in the background.
-	go func() {
-		defer listener.Close()
-		for {
-			conn, err := listener.Accept(ctx)
-			if err != nil {
-				return
-			}
-			go c.handleLANConnection(conn, challenge)
-		}
-	}()
-
-	return nil
+	slog.Info("LAN server started", "addr", addr)
+	return s, nil
 }
 
-// handleLANConnection verifies a direct LAN connection and, if valid,
-// swaps the underlying transport.
-func (c *Conn) handleLANConnection(conn *quic.Conn, expectedChallenge []byte) {
+// Addr returns the LAN address (ip:port) that clients should dial.
+func (s *LANServer) Addr() string { return s.addr }
+
+// Close stops the LAN server.
+func (s *LANServer) Close() error {
+	return s.listener.Close()
+}
+
+// registerConn records a Conn for LAN upgrade. When a client connects
+// directly and presents the correct challenge, the Conn's transport
+// is swapped. Returns the lanOffer to send to the client via relay.
+func (s *LANServer) registerConn(c *Conn) (lanOffer, error) {
+	challenge := make([]byte, 32)
+	if _, err := rand.Read(challenge); err != nil {
+		return lanOffer{}, err
+	}
+
+	s.mu.Lock()
+	s.conns[c.instanceID] = &pendingLAN{
+		challenge: challenge,
+		conn:      c,
+	}
+	s.mu.Unlock()
+
+	return lanOffer{
+		Addr:      s.addr,
+		Challenge: challenge,
+	}, nil
+}
+
+// acceptLoop accepts incoming LAN connections and verifies them.
+func (s *LANServer) acceptLoop() {
+	for {
+		conn, err := s.listener.Accept(context.Background())
+		if err != nil {
+			return
+		}
+		go s.handleConn(conn)
+	}
+}
+
+func (s *LANServer) handleConn(conn *quic.Conn) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -131,7 +144,6 @@ func (c *Conn) handleLANConnection(conn *quic.Conn, expectedChallenge []byte) {
 		return
 	}
 
-	// Read the verification message.
 	data, err := readMessage(stream)
 	if err != nil {
 		conn.CloseWithError(1, "read verify failed")
@@ -144,19 +156,24 @@ func (c *Conn) handleLANConnection(conn *quic.Conn, expectedChallenge []byte) {
 		return
 	}
 
-	// Check the challenge matches.
-	if len(verify.Challenge) != len(expectedChallenge) {
+	// Look up the pending connection by instance ID.
+	s.mu.Lock()
+	pending, ok := s.conns[verify.InstanceID]
+	if ok {
+		delete(s.conns, verify.InstanceID)
+	}
+	s.mu.Unlock()
+
+	if !ok {
+		conn.CloseWithError(1, "unknown instance")
+		return
+	}
+
+	// Verify the challenge.
+	if !challengeEqual(pending.challenge, verify.Challenge) {
 		conn.CloseWithError(1, "bad challenge")
 		return
 	}
-	for i := range verify.Challenge {
-		if verify.Challenge[i] != expectedChallenge[i] {
-			conn.CloseWithError(1, "bad challenge")
-			return
-		}
-	}
-
-	slog.Info("LAN connection verified", "peer", verify.InstanceID)
 
 	// Send confirmation.
 	if err := writeMessage(stream, []byte("ok")); err != nil {
@@ -164,30 +181,55 @@ func (c *Conn) handleLANConnection(conn *quic.Conn, expectedChallenge []byte) {
 		return
 	}
 
-	// Swap the transport.
-	c.swapTransport(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
-	slog.Info("switched to LAN transport", "peer", verify.InstanceID)
+	slog.Info("LAN connection verified", "peer", verify.InstanceID)
+
+	// Swap the relay Conn's transport to the direct LAN connection.
+	pending.conn.swapTransport(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
+	slog.Info("upgraded to LAN", "peer", verify.InstanceID)
 }
 
-// startLANClient watches for LAN offers from the peer and attempts
-// direct connections.
-func (c *Conn) startLANClient(ctx context.Context, tlsConfig *tls.Config) error {
-	if tlsConfig == nil {
-		tlsConfig = &tls.Config{
-			InsecureSkipVerify: true,
-			NextProtos:         []string{"tern-lan"},
-		}
-	} else {
-		tlsConfig = tlsConfig.Clone()
-		tlsConfig.NextProtos = []string{"tern-lan"}
+// --- lanOffer / lanVerify wire types ---
+
+// lanOffer is sent via the encrypted relay channel to advertise the
+// LAN server address.
+type lanOffer struct {
+	Addr      string `json:"addr"`
+	Challenge []byte `json:"challenge"`
+}
+
+// lanVerify is sent on the direct LAN connection to prove identity.
+type lanVerify struct {
+	Challenge  []byte `json:"challenge"`
+	InstanceID string `json:"instance_id"`
+}
+
+// --- Conn integration ---
+
+// WithLANServer configures a Conn to advertise the given LANServer
+// to connecting clients. Use with Register.
+func WithLANServer(s *LANServer) Option {
+	return func(o *options) { o.lanServer = s }
+}
+
+// WithLAN enables LAN upgrade on the client side. When the backend
+// advertises a LAN address, the client attempts a direct connection.
+// If tlsConfig is nil, InsecureSkipVerify is used.
+func WithLAN(tlsConfig *tls.Config) Option {
+	return func(o *options) {
+		o.lanEnabled = true
+		o.lanTLS = tlsConfig
 	}
+}
 
-	c.mu.Lock()
-	c.lanTLS = tlsConfig
-	c.lanEnabled = true
-	c.mu.Unlock()
-
-	return nil
+// advertiseLAN sends the LAN offer to the peer via the encrypted
+// relay channel. Called automatically after Register when WithLANServer
+// is set.
+func (c *Conn) advertiseLAN(s *LANServer) error {
+	offer, err := s.registerConn(c)
+	if err != nil {
+		return err
+	}
+	return c.sendControl(msgLANOffer, offer)
 }
 
 // handleLANOffer is called when a LAN offer control message is
@@ -205,6 +247,16 @@ func (c *Conn) handleLANOffer(offer lanOffer) {
 	slog.Info("received LAN offer", "addr", offer.Addr)
 
 	go func() {
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{
+				InsecureSkipVerify: true,
+				NextProtos:         []string{"tern-lan"},
+			}
+		} else {
+			tlsConfig = tlsConfig.Clone()
+			tlsConfig.NextProtos = []string{"tern-lan"}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
@@ -222,7 +274,6 @@ func (c *Conn) handleLANOffer(offer lanOffer) {
 			return
 		}
 
-		// Send verification.
 		verify := lanVerify{
 			Challenge:  offer.Challenge,
 			InstanceID: c.instanceID,
@@ -233,7 +284,6 @@ func (c *Conn) handleLANOffer(offer lanOffer) {
 			return
 		}
 
-		// Wait for confirmation.
 		resp, err := readMessage(stream)
 		if err != nil || string(resp) != "ok" {
 			conn.CloseWithError(1, "verify rejected")
@@ -241,21 +291,12 @@ func (c *Conn) handleLANOffer(offer lanOffer) {
 		}
 
 		slog.Info("LAN connection established", "addr", offer.Addr)
-
-		// Swap transport.
 		c.swapTransport(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
-		slog.Info("switched to LAN transport", "addr", offer.Addr)
+		slog.Info("upgraded to LAN", "addr", offer.Addr)
 	}()
 }
 
-// swapTransport atomically replaces the underlying transport of the
-// Conn. The old stream and closer are left open — QUIC will clean
-// them up when the old connection times out.
-//
-// The encryption channel's sequence counters are synchronized: the
-// send counter carries over (so the peer can verify ordering), and
-// the recv side switches to ModeDatagrams to tolerate the sequence
-// gap from the transport switch.
+// swapTransport atomically replaces the underlying transport.
 func (c *Conn) swapTransport(
 	stream io.ReadWriteCloser,
 	dg datagrammer,
@@ -270,9 +311,6 @@ func (c *Conn) swapTransport(
 	c.closer = closer
 	c.opener = opener
 	c.acceptor = acceptor
-	// Switch the channel to datagram mode to tolerate the sequence
-	// gap caused by the transport switch. The send counter is preserved
-	// so the peer can still reject replays.
 	if c.channel != nil {
 		c.channel.SetMode(crypto.ModeDatagrams)
 	}
@@ -281,8 +319,7 @@ func (c *Conn) swapTransport(
 	}
 	c.mu.Unlock()
 
-	// Send a cutover marker on the OLD stream so the relay knows
-	// we're done with it. Best-effort — the relay will time out anyway.
+	// Best-effort cutover marker on the old stream.
 	c.sendControlOn(oldStream, msgCutover, nil)
 }
 
@@ -296,7 +333,6 @@ func (c *Conn) sendControl(msgType byte, payload any) error {
 	return c.sendControlInner(stream, ch, msgType, payload)
 }
 
-// sendControlOn sends a control message on a specific stream.
 func (c *Conn) sendControlOn(stream io.ReadWriteCloser, msgType byte, payload any) {
 	c.mu.Lock()
 	ch := c.channel
@@ -328,9 +364,21 @@ func (c *Conn) sendControlInner(stream io.ReadWriteCloser, ch interface{ Encrypt
 	return writeMessage(stream, framed)
 }
 
-// generateSelfSigned creates a self-signed TLS certificate for LAN use.
+// --- Helpers ---
+
+func challengeEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func generateSelfSigned() (tls.Certificate, error) {
-	// Reuse the same approach as cmd/tern but simplified.
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, err

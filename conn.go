@@ -87,8 +87,9 @@ type Conn struct {
 	maxDgPayload int // max bytes per raw datagram (default 1200)
 
 	// LAN upgrade.
-	lanEnabled bool
-	lanTLS     *tls.Config
+	lanServer  *LANServer  // backend: advertise this server to clients
+	lanEnabled bool        // client: attempt LAN upgrade
+	lanTLS     *tls.Config // client: TLS config for LAN connections
 
 	ctx    context.Context    // Conn lifecycle context
 	cancel context.CancelFunc // cancels background goroutines
@@ -196,10 +197,20 @@ func (c *Conn) InstanceID() string {
 
 // SetChannel enables encrypted mode on the primary stream. After this
 // call, Send encrypts plaintext and Recv decrypts ciphertext automatically.
+//
+// If a LANServer was configured (via WithLANServer), SetChannel also
+// advertises the LAN address to the peer.
 func (c *Conn) SetChannel(ch *crypto.Channel) {
 	c.mu.Lock()
 	c.channel = ch
+	lanSrv := c.lanServer
 	c.mu.Unlock()
+
+	if lanSrv != nil {
+		if err := c.advertiseLAN(lanSrv); err != nil {
+			slog.Warn("failed to advertise LAN", "err", err)
+		}
+	}
 }
 
 // SetDatagramChannel enables encrypted mode for datagrams. After this

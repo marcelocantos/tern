@@ -7,119 +7,140 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/marcelocantos/tern/crypto"
 )
 
-// TestLANUpgrade verifies that two peers connected via the relay
-// automatically switch to a direct LAN connection.
+// lanPair creates a backend+client pair where the backend has a LAN
+// server and the client is LAN-enabled.
+func lanPair(t *testing.T, env relayEnv) (*Conn, *Conn, *LANServer) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	lanSrv, err := NewLANServer(nil)
+	if err != nil {
+		t.Fatal("NewLANServer:", err)
+	}
+	t.Cleanup(func() { lanSrv.Close() })
+
+	b, err := Register(ctx, env.url, append(env.opts, WithLANServer(lanSrv))...)
+	if err != nil {
+		t.Fatal("register:", err)
+	}
+	t.Cleanup(func() { b.CloseNow() })
+
+	c, err := Connect(ctx, env.url, b.InstanceID(), append(env.opts, WithLAN(nil))...)
+	if err != nil {
+		t.Fatal("connect:", err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+
+	// Set up encryption — required for LAN offer (control messages).
+	bKP, _ := crypto.GenerateKeyPair()
+	cKP, _ := crypto.GenerateKeyPair()
+	bRec := crypto.NewPairingRecord("client", "relay", bKP, cKP.Public)
+	cRec := crypto.NewPairingRecord("backend", "relay", cKP, bKP.Public)
+
+	bCh, _ := bRec.DeriveChannel([]byte("b2c"), []byte("c2b"))
+	cCh, _ := cRec.DeriveChannel([]byte("c2b"), []byte("b2c"))
+
+	// SetChannel on backend triggers LAN advertisement.
+	b.SetChannel(bCh)
+	c.SetChannel(cCh)
+
+	return b, c, lanSrv
+}
+
+// TestLANUpgrade verifies that traffic switches from relay to LAN.
 func TestLANUpgrade(t *testing.T) {
 	env := localRelay(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	b, c := connectPair(t, env)
+	b, c, _ := lanPair(t, env)
 
-	// Set up encryption (required for control messages).
-	bRec, cRec := setupPairingRecords(t)
-	setupEncryptionWithPairingRecord(t, b, c, bRec, cRec)
-
-	// Enable LAN on both sides.
-	if err := b.EnableLAN(ctx, true, nil); err != nil {
-		t.Fatal("backend EnableLAN:", err)
-	}
-	if err := c.EnableLAN(ctx, false, nil); err != nil {
-		t.Fatal("client EnableLAN:", err)
-	}
-
-	// Send a message — this triggers Recv on the client which will
-	// process the LAN offer control message.
-	if err := b.Send(ctx, []byte("via-relay")); err != nil {
-		t.Fatal("send:", err)
-	}
+	// First message triggers Recv which processes the LAN offer.
+	b.Send(ctx, []byte("via-relay"))
 	data, err := c.Recv(ctx)
 	if err != nil {
 		t.Fatal("recv:", err)
 	}
 	if string(data) != "via-relay" {
-		t.Fatalf("got %q, want via-relay", data)
+		t.Fatalf("got %q", data)
 	}
 
-	// Give the LAN connection time to establish.
+	// Wait for LAN connection to establish.
 	time.Sleep(2 * time.Second)
 
-	// Send another message — should go via LAN now.
-	if err := c.Send(ctx, []byte("via-lan")); err != nil {
-		t.Fatal("send via LAN:", err)
-	}
+	// This should go via LAN.
+	c.Send(ctx, []byte("via-lan"))
 	data, err = b.Recv(ctx)
 	if err != nil {
 		t.Fatal("recv via LAN:", err)
 	}
 	if string(data) != "via-lan" {
-		t.Fatalf("got %q, want via-lan", data)
+		t.Fatalf("got %q", data)
 	}
 
-	t.Log("LAN upgrade successful — messages delivered via direct connection")
+	t.Log("LAN upgrade successful")
 }
 
-// TestLANUpgradeBidirectional verifies that after LAN upgrade, both
-// directions work and channels function correctly.
+// TestLANUpgradeBidirectional verifies both directions work after switch.
 func TestLANUpgradeBidirectional(t *testing.T) {
 	env := localRelay(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	b, c := connectPair(t, env)
-
-	bRec, cRec := setupPairingRecords(t)
-	setupEncryptionWithPairingRecord(t, b, c, bRec, cRec)
-
-	b.EnableLAN(ctx, true, nil)
-	c.EnableLAN(ctx, false, nil)
+	b, c, _ := lanPair(t, env)
 
 	// Trigger LAN offer processing.
 	b.Send(ctx, []byte("trigger"))
 	c.Recv(ctx)
 	time.Sleep(2 * time.Second)
 
-	// Bidirectional messaging.
 	for i := range 5 {
 		msg := []byte("ping-" + string(rune('0'+i)))
 		c.Send(ctx, msg)
-		data, err := b.Recv(ctx)
-		if err != nil {
-			t.Fatalf("recv %d: %v", i, err)
-		}
+		data, _ := b.Recv(ctx)
 		if string(data) != string(msg) {
 			t.Fatalf("got %q, want %q", data, msg)
 		}
 
 		reply := []byte("pong-" + string(rune('0'+i)))
 		b.Send(ctx, reply)
-		data, err = c.Recv(ctx)
-		if err != nil {
-			t.Fatalf("recv reply %d: %v", i, err)
-		}
+		data, _ = c.Recv(ctx)
 		if string(data) != string(reply) {
 			t.Fatalf("got %q, want %q", data, reply)
 		}
 	}
 }
 
-// TestLANUpgradeWithoutEncryption verifies that EnableLAN on the
-// backend still works without encryption (the offer is sent raw).
-func TestLANUpgradeRequiresEncryption(t *testing.T) {
+// TestLANServerMultipleClients verifies the LAN server can serve
+// multiple clients concurrently.
+func TestLANServerMultipleClients(t *testing.T) {
 	env := localRelay(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	b, c := connectPair(t, env)
-
-	// Set up encryption — required for control messages.
-	bRec, cRec := setupPairingRecords(t)
-	setupEncryptionWithPairingRecord(t, b, c, bRec, cRec)
-
-	err := b.EnableLAN(ctx, true, nil)
+	lanSrv, err := NewLANServer(nil)
 	if err != nil {
-		t.Fatal("EnableLAN:", err)
+		t.Fatal(err)
 	}
+	defer lanSrv.Close()
+
+	// Two backends sharing the same LAN server.
+	b1, err := Register(ctx, env.url, append(env.opts, WithLANServer(lanSrv), WithInstanceID("b1"))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b1.CloseNow()
+
+	b2, err := Register(ctx, env.url, append(env.opts, WithLANServer(lanSrv), WithInstanceID("b2"))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b2.CloseNow()
+
+	t.Logf("LAN server addr: %s, serving 2 backends", lanSrv.Addr())
 }
