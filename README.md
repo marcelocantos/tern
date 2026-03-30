@@ -56,14 +56,16 @@ import (
 
 ```go
 // Backend registers with the relay.
-backend, _ := tern.Register(ctx, "https://tern.fly.dev",
-    tern.WithToken(os.Getenv("TERN_TOKEN")),
-    tern.WithTLS(tlsConfig))
+backend, _ := tern.Register(ctx, "https://tern.fly.dev", tern.Config{
+    Token: os.Getenv("TERN_TOKEN"),
+    TLS:   tlsConfig,
+})
 fmt.Println("Instance ID:", backend.InstanceID()) // share via QR code
 
 // Client connects by instance ID (obtained from QR scan).
-client, _ := tern.Connect(ctx, "https://tern.fly.dev", instanceID,
-    tern.WithTLS(tlsConfig))
+client, _ := tern.Connect(ctx, "https://tern.fly.dev", instanceID, tern.Config{
+    TLS: tlsConfig,
+})
 
 // Send/receive through the relay (reliable stream).
 client.Send(ctx, ciphertext)
@@ -221,6 +223,35 @@ frame, _ := video.Recv(ctx)
 Each streaming channel gets its own QUIC stream (no head-of-line
 blocking between channels). Datagram channels share the QUIC datagram
 pipe with a 2-byte channel ID prefix for demuxing.
+
+## LAN Upgrade
+
+When both peers are on the same LAN, traffic transparently switches
+from the relay to a direct QUIC connection:
+
+```go
+// Backend: start a LAN server and register with the relay.
+lan, _ := tern.NewLANServer("", nil)  // random port, self-signed cert
+defer lan.Close()
+
+backend, _ := tern.Register(ctx, relayURL, tern.Config{
+    LANServer: lan,
+})
+backend.SetChannel(ch)  // triggers LAN address advertisement
+
+// Client: enable LAN upgrade.
+client, _ := tern.Connect(ctx, relayURL, instanceID, tern.Config{
+    LAN: true,
+})
+client.SetChannel(ch)
+// LAN upgrade happens automatically in the background.
+```
+
+The LANServer is a standalone QUIC listener that can serve multiple
+clients. When a client receives the LAN offer (via the encrypted relay
+channel), it dials the backend directly, verifies via a
+challenge/response, and atomically swaps the Conn's transport. All
+subsequent Send/Recv/SendDatagram/RecvDatagram go via LAN.
 
 ## Fault Injection Testing
 

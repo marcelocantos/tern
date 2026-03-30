@@ -10,7 +10,7 @@ The pre-1.0 period (currently v0.x.x) exists to get the interaction surface righ
 
 ## Interaction Surface Catalogue
 
-*Snapshot as of v0.9.0.*
+*Snapshot as of v0.10.0.*
 
 ### Relay API (the binary's external interface)
 
@@ -38,6 +38,7 @@ CORS: `Access-Control-Allow-Origin: *` on health endpoint (for browser Alt-Svc p
 | `--key` | string | `""` | TLS private key file (PEM) |
 | `--domain` | string | `""` | Domain name for ACME (Let's Encrypt) certificate provisioning |
 | `--acme-email` | string | `""` | Contact email for ACME certificate registration |
+| `--lan` | string | `""` | LAN listener address for direct connections (e.g. `:0`, `localhost:44333`) |
 | `--version` | bool | `false` | Print version and exit |
 | `--help-agent` | bool | `false` | Print usage + agents-guide.md and exit |
 
@@ -108,17 +109,27 @@ type DatagramChannel struct { /* unexported fields */ }
 func (dc *DatagramChannel) Send(data []byte) error
 func (dc *DatagramChannel) Recv(ctx context.Context) ([]byte, error)
 
-// Connection options
-type Option func(*options)
-func WithToken(token string) Option
-func WithTLS(tlsConfig *tls.Config) Option
-func WithWebTransport() Option
-func WithQUICPort(port string) Option
-func WithInstanceID(id string) Option
+// Config struct
+type Config struct {
+    Token        string
+    InstanceID   string
+    TLS          *tls.Config
+    WebTransport bool
+    QUICPort     string
+    LANServer    *LANServer
+    LAN          bool
+    LANTLS       *tls.Config
+}
 
 // Client-side connectivity
-func Register(ctx context.Context, relayURL string, opts ...Option) (*Conn, error)
-func Connect(ctx context.Context, relayURL, instanceID string, opts ...Option) (*Conn, error)
+func Register(ctx context.Context, relayURL string, c Config) (*Conn, error)
+func Connect(ctx context.Context, relayURL, instanceID string, c Config) (*Conn, error)
+
+// LAN server
+type LANServer struct { /* unexported fields */ }
+func NewLANServer(addr string, tlsConfig *tls.Config) (*LANServer, error)
+func (s *LANServer) Addr() string
+func (s *LANServer) Close() error
 
 // Server library — WebTransport (browsers)
 type WebTransportServer struct { /* unexported fields */ }

@@ -30,6 +30,11 @@ maintenance activities. Append-only — newest entries at the bottom.
   - TLA+ model for cutover protocol (🎯T10)
   - Channel API (streaming + datagram channels)
 
+## 2026-03-30 — /release v0.10.0
+
+- **Commit**: `f91e752`
+- **Outcome**: Released v0.10.0. LAN upgrade (LANServer, Config.LAN), Config struct replaces options pattern, --lan CLI flag. 13 LAN tests. Homebrew formula updated.
+
 ## 2026-03-30 — /release v0.9.0
 
 - **Commit**: `cd8c35b`
