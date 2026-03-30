@@ -326,6 +326,15 @@ func (c *Conn) RecvDatagram(ctx context.Context) ([]byte, error) {
 	return ch.Decrypt(data)
 }
 
+// Fragmenter returns a Fragmenter for sending and receiving large
+// datagrams that exceed the QUIC datagram frame size. Fragments are
+// sent as individual datagrams and reassembled on the receive side.
+// If any fragment doesn't arrive within the timeout, the entire
+// message is discarded.
+func (c *Conn) Fragmenter(opts ...FragmenterOption) *Fragmenter {
+	return NewFragmenter(c.dg, opts...)
+}
+
 // Close gracefully closes the session. It closes the primary
 // bidirectional stream first (allowing buffered data to flush) before
 // closing the session.
