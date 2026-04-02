@@ -67,6 +67,11 @@ type Config struct {
 	// LANTLS is the TLS config for LAN connections (client side).
 	// If nil and LAN is true, InsecureSkipVerify is used.
 	LANTLS *tls.Config
+
+	// Wake, if true, sends an HTTPS request to /health before
+	// connecting. This wakes a Fly.io machine that has been
+	// auto-stopped. No-op if the relay is already running.
+	Wake bool
 }
 
 
@@ -102,6 +107,9 @@ func WakeRelay(ctx context.Context, relayURL string, c Config) error {
 // (ALPN "tern"). The relay assigns an instance ID, returned via
 // InstanceID(). The caller is responsible for closing the connection.
 func Register(ctx context.Context, relayURL string, c Config) (*Conn, error) {
+	if c.Wake {
+		WakeRelay(ctx, relayURL, c) // best-effort; ignore errors
+	}
 
 	var conn *Conn
 	var err error
@@ -130,6 +138,9 @@ func Register(ctx context.Context, relayURL string, c Config) (*Conn, error) {
 // Connect connects to a relay as a client targeting a specific backend
 // instance ID. By default uses raw QUIC (ALPN "tern").
 func Connect(ctx context.Context, relayURL, instanceID string, c Config) (*Conn, error) {
+	if c.Wake {
+		WakeRelay(ctx, relayURL, c) // best-effort; ignore errors
+	}
 
 	var conn *Conn
 	var err error

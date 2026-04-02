@@ -174,6 +174,20 @@ public final class TernConn: @unchecked Sendable {
         connection.cancel()
     }
 
+    /// Wake a Fly.io relay that may be auto-stopped.
+    ///
+    /// Sends an HTTPS request to /health, which triggers Fly's proxy to
+    /// start the machine. No-op if the relay is already running.
+    /// Best-effort — errors are silently ignored.
+    ///
+    /// - Parameters:
+    ///   - host: Relay server hostname (e.g., "tern.fly.dev").
+    ///   - port: HTTPS port (typically 443).
+    public static func wakeRelay(host: String, port: UInt16 = 443) async {
+        guard let url = URL(string: "https://\(host):\(port)/health") else { return }
+        _ = try? await URLSession.shared.data(from: url)
+    }
+
     // MARK: - Internal helpers
 
     /// Open a QUIC connection and wait for it to become ready.

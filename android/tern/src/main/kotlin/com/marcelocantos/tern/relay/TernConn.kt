@@ -6,6 +6,8 @@ package com.marcelocantos.tern.relay
 import com.marcelocantos.tern.crypto.E2EChannel
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.ByteBuffer
 
 /**
@@ -144,6 +146,30 @@ fun register(transport: QuicTransport, token: String? = null): TernConn {
 fun connect(transport: QuicTransport, instanceID: String): TernConn {
     writeMessage(transport.outputStream, "connect:$instanceID".toByteArray())
     return TernConn(transport, instanceID)
+}
+
+/**
+ * Wake a Fly.io relay that may be auto-stopped.
+ *
+ * Sends an HTTPS request to /health, which triggers Fly's proxy to
+ * start the machine. No-op if the relay is already running.
+ * Best-effort — exceptions are silently ignored.
+ *
+ * @param host relay hostname (e.g., "tern.fly.dev")
+ * @param port HTTPS port (typically 443)
+ */
+fun wakeRelay(host: String, port: Int = 443) {
+    try {
+        val url = URL("https://$host:$port/health")
+        val conn = url.openConnection() as HttpURLConnection
+        conn.connectTimeout = 10_000
+        conn.readTimeout = 10_000
+        conn.requestMethod = "GET"
+        conn.responseCode // triggers the request
+        conn.disconnect()
+    } catch (_: Exception) {
+        // Best-effort.
+    }
 }
 
 // ---- Length-prefixed framing (matches Go writeMessage/readMessage) ----

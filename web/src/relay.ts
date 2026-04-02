@@ -260,3 +260,19 @@ export async function connect(
 
   return new Conn(transport, writer, reader, instanceID);
 }
+
+/**
+ * Wake a Fly.io relay that may be auto-stopped. Sends an HTTPS
+ * request to /health, which triggers Fly's proxy to start the machine.
+ * No-op if the relay is already running. Best-effort — errors are
+ * silently ignored.
+ */
+export async function wakeRelay(url: string): Promise<void> {
+  const healthURL = url.replace(/\/$/, "") + "/health";
+  try {
+    await fetch(healthURL);
+  } catch {
+    // Best-effort: the relay may not support HTTPS health checks
+    // (e.g., local development with self-signed certs).
+  }
+}
