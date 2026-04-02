@@ -26,6 +26,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/webtransport-go"
@@ -68,6 +69,34 @@ type Config struct {
 	LANTLS *tls.Config
 }
 
+
+// WakeRelay sends an HTTPS request to the relay's /health endpoint,
+// which triggers Fly.io's proxy to start a stopped machine. Call this
+// before Register or Connect if the relay may be auto-stopped.
+// The relay URL should be the same one passed to Register/Connect.
+func WakeRelay(ctx context.Context, relayURL string, c Config) error {
+	tlsConfig := c.TLS
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{}
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{TLSClientConfig: tlsConfig},
+		Timeout:   10 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", relayURL+"/health", nil)
+	if err != nil {
+		return fmt.Errorf("wake relay: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("wake relay: %w", err)
+	}
+	resp.Body.Close()
+	return nil
+}
 
 // Register connects to the relay as a backend. By default uses raw QUIC
 // (ALPN "tern"). The relay assigns an instance ID, returned via

@@ -11,7 +11,24 @@ primary_region = "syd"
 [processes]
   app = "/tern --domain tern.fly.dev --acme-email marcelo@cantos.id.au"
 
-# WebTransport (browsers) on port 443
+# TCP on port 443 — serves ACME TLS-ALPN-01, HTTPS /health, and
+# Alt-Svc headers. Also acts as the auto-start wake trigger: Fly's
+# proxy can only start stopped machines via TCP, not UDP.
+[[services]]
+  internal_port = 443
+  protocol = "tcp"
+  auto_start_machines = true
+  auto_stop_machines = "stop"
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 443
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+
+# WebTransport (browsers) on UDP port 443 — QUIC/HTTP3.
 [[services]]
   internal_port = 443
   protocol = "udp"
@@ -20,15 +37,7 @@ primary_region = "syd"
   [[services.ports]]
     port = 443
 
-[[services]]
-  internal_port = 443
-  protocol = "tcp"
-  processes = ["app"]
-
-  [[services.ports]]
-    port = 443
-
-# Raw QUIC (native clients) on port 4433
+# Raw QUIC (native clients) on UDP port 4433.
 [[services]]
   internal_port = 4433
   protocol = "udp"
