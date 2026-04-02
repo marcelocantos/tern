@@ -215,6 +215,9 @@ export async function register(
   url: string,
   opts?: ConnectOptions,
 ): Promise<Conn> {
+  // Wake the relay if auto-stopped (best-effort).
+  await wakeRelay(url);
+
   let registerURL = url.replace(/\/$/, "") + "/register";
 
   // WebTransport supports headers via URL params or protocol-level auth.
@@ -249,6 +252,9 @@ export async function connect(
   instanceID: string,
   opts?: ConnectOptions,
 ): Promise<Conn> {
+  // Wake the relay if auto-stopped (best-effort).
+  await wakeRelay(url);
+
   const connectURL =
     url.replace(/\/$/, "") + "/ws/" + encodeURIComponent(instanceID);
 

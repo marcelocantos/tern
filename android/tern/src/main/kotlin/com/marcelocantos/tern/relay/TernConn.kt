@@ -127,7 +127,8 @@ class TernConn internal constructor(
  * @param token optional bearer token for authentication
  * @return a [TernConn] ready for bidirectional messaging
  */
-fun register(transport: QuicTransport, token: String? = null): TernConn {
+fun register(transport: QuicTransport, token: String? = null, host: String? = null): TernConn {
+    if (host != null) wakeRelay(host)
     val handshake = if (token != null) "register:$token" else "register"
     writeMessage(transport.outputStream, handshake.toByteArray())
     val id = readMessage(transport.inputStream)
@@ -143,7 +144,8 @@ fun register(transport: QuicTransport, token: String? = null): TernConn {
  * @param instanceID the relay-assigned instance ID of the target backend
  * @return a [TernConn] ready for bidirectional messaging
  */
-fun connect(transport: QuicTransport, instanceID: String): TernConn {
+fun connect(transport: QuicTransport, instanceID: String, host: String? = null): TernConn {
+    if (host != null) wakeRelay(host)
     writeMessage(transport.outputStream, "connect:$instanceID".toByteArray())
     return TernConn(transport, instanceID)
 }

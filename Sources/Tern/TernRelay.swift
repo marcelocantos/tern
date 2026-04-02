@@ -79,6 +79,9 @@ public final class TernConn: @unchecked Sendable {
         token: String? = nil,
         quicOptions: NWProtocolQUIC.Options? = nil
     ) async throws -> TernConn {
+        // Wake the relay if it's auto-stopped (best-effort).
+        await wakeRelay(host: host, port: port)
+
         let handshake: String
         if let token = token {
             handshake = "register:\(token)"
@@ -115,6 +118,9 @@ public final class TernConn: @unchecked Sendable {
         instanceID: String,
         quicOptions: NWProtocolQUIC.Options? = nil
     ) async throws -> TernConn {
+        // Wake the relay if it's auto-stopped (best-effort).
+        await wakeRelay(host: host, port: port)
+
         let handshake = "connect:\(instanceID)"
 
         let (conn, queue) = try await openConnection(host: host, port: port, quicOptions: quicOptions)
