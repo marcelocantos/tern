@@ -227,7 +227,9 @@ Investigate:
 - Alternative hosting that handles UDP auto-start natively
 
 - **Weight**: 1.7 (value 5 / cost 3)
-- **Status**: not started
+- **Status**: done — TCP service on port 443 with auto_start_machines=true.
+  Fly proxy wakes the machine on TCP/HTTPS, then UDP flows to the running
+  machine. WakeRelay() helper for clients.
 
 ---
 
