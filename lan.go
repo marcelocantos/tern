@@ -313,14 +313,27 @@ func (c *Conn) swapTransport(
 	if c.dgChannel != nil {
 		c.dgChannel.SetMode(crypto.ModeDatagrams)
 	}
+	// Signal that LAN is active.
+	select {
+	case <-c.lanReady:
+		// Already closed (shouldn't happen, but safe).
+	default:
+		close(c.lanReady)
+	}
 	c.mu.Unlock()
 
-	// Best-effort cutover marker on the old stream.
-	c.sendControlOn(oldStream, msgCutover, nil)
+	// Close the old stream. The relay will detect the disconnect and
+	// clean up. We don't send a cutover marker because the encrypted
+	// nonce counter has already moved to the new transport — sending
+	// on the old stream would create nonce ordering issues.
+	oldStream.Close()
 }
 
 // sendControl sends an internal control message on the primary stream.
 func (c *Conn) sendControl(msgType byte, payload any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
 	c.mu.Lock()
 	ch := c.channel
 	stream := c.stream
@@ -329,14 +342,7 @@ func (c *Conn) sendControl(msgType byte, payload any) error {
 	return c.sendControlInner(stream, ch, msgType, payload)
 }
 
-func (c *Conn) sendControlOn(stream io.ReadWriteCloser, msgType byte, payload any) {
-	c.mu.Lock()
-	ch := c.channel
-	c.mu.Unlock()
-
-	c.sendControlInner(stream, ch, msgType, payload)
-}
-
+// sendControlInner sends a control message. Caller must hold writeMu.
 func (c *Conn) sendControlInner(stream io.ReadWriteCloser, ch interface{ Encrypt([]byte) []byte }, msgType byte, payload any) error {
 	var data []byte
 	if payload != nil {
@@ -355,8 +361,6 @@ func (c *Conn) sendControlInner(stream io.ReadWriteCloser, ch interface{ Encrypt
 		framed = ch.Encrypt(framed)
 	}
 
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
 	return writeMessage(stream, framed)
 }
 

@@ -61,9 +61,11 @@ func lanPair(t *testing.T, env relayEnv) (*Conn, *Conn, *LANServer) {
 }
 
 // waitForLAN sends a message to trigger LAN offer processing, then
-// waits for the LAN connection to establish.
+// waits for both sides to complete the LAN switch.
 func waitForLAN(t *testing.T, ctx context.Context, sender, receiver *Conn) {
 	t.Helper()
+	// The backend's LAN offer is sent as a control message. The client
+	// processes it during Recv, so we need to send a message to trigger it.
 	sender.Send(ctx, []byte("lan-trigger"))
 	data, err := receiver.Recv(ctx)
 	if err != nil {
@@ -72,7 +74,18 @@ func waitForLAN(t *testing.T, ctx context.Context, sender, receiver *Conn) {
 	if string(data) != "lan-trigger" {
 		t.Fatalf("got %q, want lan-trigger", data)
 	}
-	time.Sleep(2 * time.Second)
+
+	// Wait for both sides to complete the LAN switch.
+	select {
+	case <-sender.LANReady():
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for sender LAN")
+	}
+	select {
+	case <-receiver.LANReady():
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for receiver LAN")
+	}
 }
 
 // TestLANUpgrade verifies that traffic switches from relay to LAN.

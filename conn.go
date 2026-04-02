@@ -90,6 +90,7 @@ type Conn struct {
 	lanServer  *LANServer  // backend: advertise this server to clients
 	lanEnabled bool        // client: attempt LAN upgrade
 	lanTLS     *tls.Config // client: TLS config for LAN connections
+	lanReady   chan struct{} // closed when LAN transport is active
 
 	ctx    context.Context    // Conn lifecycle context
 	cancel context.CancelFunc // cancels background goroutines
@@ -107,6 +108,7 @@ func newConn(stream io.ReadWriteCloser, dg datagrammer, closer io.Closer, opener
 		acceptor:     acceptor,
 		reasm:        newReassembler(DefaultFragmentTimeout, done),
 		maxDgPayload: DefaultMaxDatagramPayload,
+		lanReady:     make(chan struct{}),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -195,6 +197,19 @@ func (c *Conn) InstanceID() string {
 	return c.instanceID
 }
 
+// LANReady returns a channel that is closed when the LAN transport
+// is active. Use this to wait for the LAN upgrade to complete:
+//
+//	select {
+//	case <-conn.LANReady():
+//	    // LAN is active
+//	case <-ctx.Done():
+//	    // timed out, still on relay
+//	}
+func (c *Conn) LANReady() <-chan struct{} {
+	return c.lanReady
+}
+
 // SetChannel enables encrypted mode on the primary stream. After this
 // call, Send encrypts plaintext and Recv decrypts ciphertext automatically.
 //
@@ -231,8 +246,15 @@ func (c *Conn) SetDatagramChannel(ch *crypto.Channel) {
 // via SetWriteDeadline. Cancellation without a deadline is not supported
 // (the underlying stream write is not interruptible).
 func (c *Conn) Send(ctx context.Context, data []byte) error {
+	// Hold writeMu for the entire encrypt+write to prevent the transport
+	// swap from interleaving between encryption (nonce consumed) and the
+	// actual write to the stream.
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
 	c.mu.Lock()
 	ch := c.channel
+	stream := c.stream
 	c.mu.Unlock()
 
 	payload := data
@@ -243,19 +265,14 @@ func (c *Conn) Send(ctx context.Context, data []byte) error {
 		payload = ch.Encrypt(framed)
 	}
 
-	// Serialise writes: writeMessage performs two Write calls
-	// (length header + payload) which must not interleave.
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-
 	if deadline, ok := ctx.Deadline(); ok {
-		if dl, ok := c.stream.(deadliner); ok {
+		if dl, ok := stream.(deadliner); ok {
 			dl.SetWriteDeadline(deadline)
 			defer dl.SetWriteDeadline(time.Time{})
 		}
 	}
 
-	return writeMessage(c.stream, payload)
+	return writeMessage(stream, payload)
 }
 
 // Recv reads the next message from the primary bidirectional stream.
