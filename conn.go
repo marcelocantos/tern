@@ -61,11 +61,8 @@ type Conn struct {
 	writeMu sync.Mutex // serialises writes to the primary stream
 	instanceID string
 
-	stream   io.ReadWriteCloser // primary bidirectional stream (quic.Stream or webtransport.Stream)
-	dg       datagrammer        // datagram interface (quic.Connection or webtransport.Session)
-	closer   io.Closer          // the session/connection itself
-	opener   streamOpener       // opens additional bidirectional streams
-	acceptor streamAcceptor     // accepts incoming streams from peer
+	// Path routing — relay is permanent, direct (LAN/STUN) is optional.
+	router *pathRouter
 
 	// Encryption for the primary stream. Nil means raw mode.
 	channel *crypto.Channel
@@ -90,7 +87,7 @@ type Conn struct {
 	lanServer  *LANServer  // backend: advertise this server to clients
 	lanEnabled bool        // client: attempt LAN upgrade
 	lanTLS     *tls.Config // client: TLS config for LAN connections
-	lanReady   chan struct{} // closed when LAN transport is active
+	lanReady   chan struct{} // closed when direct path is active
 
 	ctx    context.Context    // Conn lifecycle context
 	cancel context.CancelFunc // cancels background goroutines
@@ -99,13 +96,10 @@ type Conn struct {
 func newConn(stream io.ReadWriteCloser, dg datagrammer, closer io.Closer, opener streamOpener, acceptor streamAcceptor, instanceID string) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	relay := newPath("relay", stream, dg, closer, opener, acceptor)
 	c := &Conn{
 		instanceID:   instanceID,
-		stream:       stream,
-		dg:           dg,
-		closer:       closer,
-		opener:       opener,
-		acceptor:     acceptor,
+		router:       newPathRouter(relay),
 		reasm:        newReassembler(DefaultFragmentTimeout, done),
 		maxDgPayload: DefaultMaxDatagramPayload,
 		lanReady:     make(chan struct{}),
@@ -129,12 +123,16 @@ func (c *Conn) SetPairingRecord(rec *crypto.PairingRecord) {
 	c.mu.Unlock()
 }
 
+// active returns the active path.
+func (c *Conn) active() *path { return c.router.activePath() }
+
 // acceptStream accepts the next incoming bidirectional stream from the peer.
 func (c *Conn) acceptStream(ctx context.Context) (io.ReadWriteCloser, error) {
-	if c.acceptor == nil {
+	p := c.active()
+	if p.acceptor == nil {
 		return nil, io.ErrClosedPipe
 	}
-	return c.acceptor.AcceptStream(ctx)
+	return p.acceptor.AcceptStream(ctx)
 }
 
 // datagramDispatcher reads datagrams from the QUIC connection and
@@ -189,7 +187,7 @@ func (c *Conn) recvTaggedDatagram(ctx context.Context, id uint16) ([]byte, error
 // Additional streams opened via OpenStream are not forwarded to the peer.
 // TODO: Add multi-stream relay support in session.go (bridgeClient).
 func (c *Conn) OpenStream() (io.ReadWriteCloser, error) {
-	return c.opener.OpenStream()
+	return c.active().opener.OpenStream()
 }
 
 // InstanceID returns the relay-assigned instance ID.
@@ -254,8 +252,9 @@ func (c *Conn) Send(ctx context.Context, data []byte) error {
 
 	c.mu.Lock()
 	ch := c.channel
-	stream := c.stream
 	c.mu.Unlock()
+	p := c.active()
+	stream := p.stream
 
 	payload := data
 	if ch != nil {
@@ -283,8 +282,9 @@ func (c *Conn) Send(ctx context.Context, data []byte) error {
 // via SetReadDeadline. Cancellation without a deadline is not supported
 // (the underlying stream read is not interruptible).
 func (c *Conn) Recv(ctx context.Context) ([]byte, error) {
+	p := c.active()
 	if deadline, ok := ctx.Deadline(); ok {
-		if dl, ok := c.stream.(deadliner); ok {
+		if dl, ok := p.stream.(deadliner); ok {
 			dl.SetReadDeadline(deadline)
 			defer dl.SetReadDeadline(time.Time{})
 		}
@@ -295,7 +295,7 @@ func (c *Conn) Recv(ctx context.Context) ([]byte, error) {
 		ch := c.channel
 		c.mu.Unlock()
 
-		data, err := readMessage(c.stream)
+		data, err := readMessage(p.stream)
 		if err != nil {
 			return nil, err
 		}
@@ -357,12 +357,12 @@ func (c *Conn) SendDatagram(data []byte) error {
 		frame := make([]byte, 1+len(payload))
 		frame[0] = dgConnWhole
 		copy(frame[1:], payload)
-		return c.dg.SendDatagram(frame)
+		return c.active().dg.SendDatagram(frame)
 	}
 
 	// Fragment it.
 	msgID := nextMsgID.Add(1)
-	return sendFragmented(c.dg, payload, c.maxDgPayload, msgID, dgConnFragment, nil)
+	return sendFragmented(c.active().dg, payload, c.maxDgPayload, msgID, dgConnFragment, nil)
 }
 
 // RecvDatagram receives the next datagram from the peer. Fragmented
@@ -429,7 +429,7 @@ func (c *Conn) ensureDispatcher() {
 // the channel ID (-1 for conn-level datagrams).
 func (c *Conn) recvRawDatagram(ctx context.Context) (payload []byte, chanID int, err error) {
 	for {
-		data, err := c.dg.ReceiveDatagram(ctx)
+		data, err := c.active().dg.ReceiveDatagram(ctx)
 		if err != nil {
 			return nil, -1, err
 		}
@@ -515,14 +515,15 @@ func (c *Conn) routeToChannel(id uint16, payload []byte) {
 // closing the session.
 func (c *Conn) Close() error {
 	c.cancel()
-	if c.stream != nil {
-		c.stream.Close()
+	p := c.active()
+	if p.stream != nil {
+		p.stream.Close()
 	}
-	return c.closer.Close()
+	return p.closer.Close()
 }
 
 // CloseNow immediately closes the session.
 func (c *Conn) CloseNow() error {
 	c.cancel()
-	return c.closer.Close()
+	return c.active().closer.Close()
 }

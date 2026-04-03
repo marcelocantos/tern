@@ -400,3 +400,78 @@ func TestLANServerInvalidAddr(t *testing.T) {
 		t.Fatal("expected error for invalid addr")
 	}
 }
+
+// TestLANFallbackToRelay verifies that when the LAN path dies, the
+// Conn falls back to relay and communication continues.
+func TestLANFallbackToRelay(t *testing.T) {
+	env := localRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	b, c, lanSrv := lanPair(t, env)
+	waitForLAN(t, ctx, b, c)
+
+	// Verify we're on LAN.
+	c.Send(ctx, []byte("on-lan"))
+	data, _ := b.Recv(ctx)
+	if string(data) != "on-lan" {
+		t.Fatalf("got %q", data)
+	}
+
+	// Kill the LAN server — the direct path will fail.
+	lanSrv.Close()
+
+	// Force fallback by triggering the router.
+	c.router.fallbackToRelay()
+	b.router.fallbackToRelay()
+
+	// Communication should continue via relay.
+	c.Send(ctx, []byte("back-on-relay"))
+	data, err := b.Recv(ctx)
+	if err != nil {
+		t.Fatal("recv after fallback:", err)
+	}
+	if string(data) != "back-on-relay" {
+		t.Fatalf("got %q", data)
+	}
+
+	// Reverse direction too.
+	b.Send(ctx, []byte("relay-reply"))
+	data, _ = c.Recv(ctx)
+	if string(data) != "relay-reply" {
+		t.Fatalf("got %q", data)
+	}
+}
+
+// TestPathRouterBasics verifies the path router's state management.
+func TestPathRouterBasics(t *testing.T) {
+	relay := newPath("relay", nil, nil, nil, nil, nil)
+	r := newPathRouter(relay)
+
+	if r.activePath() != relay {
+		t.Fatal("expected relay as initial active path")
+	}
+	if r.hasDirect() {
+		t.Fatal("should not have direct path initially")
+	}
+
+	direct := newPath("lan", nil, nil, nil, nil, nil)
+	r.setDirect(direct)
+	if r.activePath() != direct {
+		t.Fatal("expected direct as active path after setDirect")
+	}
+	if !r.hasDirect() {
+		t.Fatal("should have direct path")
+	}
+	if !r.isDirectActive() {
+		t.Fatal("direct should be active")
+	}
+
+	r.fallbackToRelay()
+	if r.activePath() != relay {
+		t.Fatal("expected relay after fallback")
+	}
+	if r.hasDirect() {
+		t.Fatal("direct should be cleared after fallback")
+	}
+}

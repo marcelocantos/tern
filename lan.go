@@ -196,7 +196,7 @@ func (s *LANServer) handleConn(conn *quic.Conn) {
 	slog.Info("LAN connection verified", "peer", verify.InstanceID)
 
 	// Swap the relay Conn's transport to the direct LAN connection.
-	pending.conn.swapTransport(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
+	pending.conn.setDirectPath(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
 	slog.Info("upgraded to LAN", "peer", verify.InstanceID)
 }
 
@@ -287,46 +287,65 @@ func (c *Conn) handleLANOffer(offer lanOffer) {
 		}
 
 		slog.Info("LAN connection established", "addr", offer.Addr)
-		c.swapTransport(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
+		c.setDirectPath(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
 		slog.Info("upgraded to LAN", "addr", offer.Addr)
 	}()
 }
 
-// swapTransport atomically replaces the underlying transport.
-func (c *Conn) swapTransport(
+// setDirectPath installs a direct (LAN/STUN) transport path and
+// starts health monitoring. If the direct path fails, the Conn falls
+// back to relay and re-advertises LAN for future re-establishment.
+func (c *Conn) setDirectPath(
 	stream io.ReadWriteCloser,
 	dg datagrammer,
 	closer io.Closer,
 	opener streamOpener,
 	acceptor streamAcceptor,
 ) {
+	direct := newPath("lan", stream, dg, closer, opener, acceptor)
+
 	c.mu.Lock()
-	oldStream := c.stream
-	c.stream = stream
-	c.dg = dg
-	c.closer = closer
-	c.opener = opener
-	c.acceptor = acceptor
 	if c.channel != nil {
 		c.channel.SetMode(crypto.ModeDatagrams)
 	}
 	if c.dgChannel != nil {
 		c.dgChannel.SetMode(crypto.ModeDatagrams)
 	}
-	// Signal that LAN is active.
 	select {
 	case <-c.lanReady:
-		// Already closed (shouldn't happen, but safe).
 	default:
 		close(c.lanReady)
 	}
 	c.mu.Unlock()
 
-	// Close the old stream. The relay will detect the disconnect and
-	// clean up. We don't send a cutover marker because the encrypted
-	// nonce counter has already moved to the new transport — sending
-	// on the old stream would create nonce ordering issues.
-	oldStream.Close()
+	c.router.setDirect(direct)
+
+	// Start health monitoring — falls back to relay if the direct
+	// path degrades, then re-advertises LAN.
+	go c.router.monitor(c.ctx, func(p *path) error {
+		// Ping by sending a zero-length datagram. The QUIC stack will
+		// detect if the path is dead (no ACK, connection timeout).
+		return p.dg.SendDatagram([]byte{dgConnWhole})
+	})
+
+	// When fallback happens, re-advertise LAN so we can re-establish
+	// when the direct path becomes available again.
+	c.router.onSwitch = func(from, to string) {
+		if to == "relay" {
+			c.mu.Lock()
+			lanSrv := c.lanServer
+			// Reset lanReady so callers can wait for the next switch.
+			c.lanReady = make(chan struct{})
+			c.mu.Unlock()
+
+			if lanSrv != nil {
+				slog.Info("re-advertising LAN after fallback")
+				if err := c.advertiseLAN(lanSrv); err != nil {
+					slog.Warn("re-advertise LAN failed", "err", err)
+				}
+			}
+		}
+	}
 }
 
 // sendControl sends an internal control message on the primary stream.
@@ -336,8 +355,8 @@ func (c *Conn) sendControl(msgType byte, payload any) error {
 
 	c.mu.Lock()
 	ch := c.channel
-	stream := c.stream
 	c.mu.Unlock()
+	stream := c.active().stream
 
 	return c.sendControlInner(stream, ch, msgType, payload)
 }

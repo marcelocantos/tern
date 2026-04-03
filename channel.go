@@ -60,7 +60,7 @@ func (sc *StreamChannel) Close() error {
 //
 // The peer receives this channel via AcceptChannel.
 func (c *Conn) OpenChannel(name string) (*StreamChannel, error) {
-	stream, err := c.opener.OpenStream()
+	stream, err := c.active().opener.OpenStream()
 	if err != nil {
 		return nil, err
 	}
@@ -166,12 +166,12 @@ func (dc *DatagramChannel) Send(data []byte) error {
 		frame[0] = dgChanWhole
 		copy(frame[1:], chanPrefix)
 		copy(frame[1+chanIDSize:], payload)
-		return dc.conn.dg.SendDatagram(frame)
+		return dc.conn.active().dg.SendDatagram(frame)
 	}
 
 	// Fragment it.
 	msgID := nextMsgID.Add(1)
-	return sendFragmented(dc.conn.dg, payload, dc.conn.maxDgPayload, msgID, dgChanFragment, chanPrefix)
+	return sendFragmented(dc.conn.active().dg, payload, dc.conn.maxDgPayload, msgID, dgChanFragment, chanPrefix)
 }
 
 // Recv receives the next datagram on this channel. Blocks until a

@@ -145,8 +145,9 @@ func TestDatagramFragmentTimeout(t *testing.T) {
 	}
 
 	// Create a conn that reads from mock, with the test reassembler.
+	relay := newPath("test", nil, mock, nil, nil, nil)
 	c := &Conn{
-		dg:           mock,
+		router:       newPathRouter(relay),
 		reasm:        reasm,
 		maxDgPayload: DefaultMaxDatagramPayload,
 	}

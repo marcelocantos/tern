@@ -999,21 +999,21 @@ func TestEncryptedRecvControlMessages(t *testing.T) {
 	lanOfferPayload := append([]byte{0x01}, []byte("lan-offer-data")...)
 	cipherLAN := bCh.Encrypt(lanOfferPayload)
 	b.writeMu.Lock()
-	writeMessage(b.stream, cipherLAN)
+	writeMessage(b.active().stream, cipherLAN)
 	b.writeMu.Unlock()
 
 	// Encrypt a control message (msgCutover = 0x02).
 	cutoverPayload := append([]byte{0x02}, []byte("cutover-data")...)
 	cipherCutover := bCh.Encrypt(cutoverPayload)
 	b.writeMu.Lock()
-	writeMessage(b.stream, cipherCutover)
+	writeMessage(b.active().stream, cipherCutover)
 	b.writeMu.Unlock()
 
 	// Encrypt an unknown message type (0xFF).
 	unknownPayload := append([]byte{0xFF}, []byte("unknown-data")...)
 	cipherUnknown := bCh.Encrypt(unknownPayload)
 	b.writeMu.Lock()
-	writeMessage(b.stream, cipherUnknown)
+	writeMessage(b.active().stream, cipherUnknown)
 	b.writeMu.Unlock()
 
 	// Now send a normal application message.
@@ -1047,7 +1047,7 @@ func TestEncryptedRecvEmptyPlaintext(t *testing.T) {
 
 	cipherEmpty := bCh.Encrypt([]byte{})
 	b.writeMu.Lock()
-	writeMessage(b.stream, cipherEmpty)
+	writeMessage(b.active().stream, cipherEmpty)
 	b.writeMu.Unlock()
 
 	// Recv should return nil data and nil error for empty plaintext.
@@ -2092,7 +2092,7 @@ func TestEncryptedRecvDecryptError(t *testing.T) {
 	// Send garbage bytes that look like a valid length-prefixed message
 	// but are not valid ciphertext. Access the raw stream directly.
 	b.writeMu.Lock()
-	writeMessage(b.stream, []byte("this is not valid ciphertext at all!"))
+	writeMessage(b.active().stream, []byte("this is not valid ciphertext at all!"))
 	b.writeMu.Unlock()
 
 	// Client should get a decrypt error.
