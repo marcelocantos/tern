@@ -22,3 +22,5 @@ android/build/
 formal/states/
 formal/*_TTrace_*
 formal/tla2tools.jar
+states/
+formal/*_TTrace_*.tla
