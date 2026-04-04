@@ -20,6 +20,7 @@ type yamlProtocol struct {
 	Vars         yaml.Node                  `yaml:"vars"`
 	Guards       yaml.Node                  `yaml:"guards"`
 	Operators    yaml.Node                  `yaml:"operators"`
+	Phases       map[string][]string        `yaml:"phases"`
 	AdvGuard     string                     `yaml:"adversary_guard"`
 	Adversary    []yamlAdvAction            `yaml:"adversary"`
 	Properties   []yamlProperty             `yaml:"properties"`
@@ -188,6 +189,15 @@ func ParseYAML(data []byte) (*Protocol, error) {
 			Desc: ya.Desc,
 			Code: strings.Join(indented, "\n"),
 		})
+	}
+
+	// Phases — preserve YAML key order by using sorted keys.
+	for name, states := range yp.Phases {
+		var ss []State
+		for _, s := range states {
+			ss = append(ss, State(s))
+		}
+		p.Phases = append(p.Phases, Phase{Name: name, States: ss})
 	}
 
 	p.AdvGuard = yp.AdvGuard

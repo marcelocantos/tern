@@ -9,37 +9,115 @@ import (
 	"strings"
 )
 
-// ExportPlantUML writes a PlantUML state diagram with parallel state
-// machines and cross-actor interaction arrows.
+// ExportPlantUML writes a PlantUML state diagram. If the protocol has
+// phases defined, states are grouped into hierarchical superstates.
+// Each actor gets its own concurrent region.
 func (p *Protocol) ExportPlantUML(w io.Writer) error {
 	var b strings.Builder
 
 	b.WriteString("@startuml ")
-	b.WriteString(p.Name)
-	b.WriteString("\n!theme plain\n\n")
-	fmt.Fprintf(&b, "title %s — Parallel State Machines\n\n", p.Name)
+	b.WriteString(sanitisePUML(p.Name))
+	b.WriteString("\n!theme plain\nskinparam backgroundColor white\n")
+	b.WriteString("skinparam state {\n  BackgroundColor #f8f8f8\n  BorderColor #888\n}\n\n")
+	fmt.Fprintf(&b, "title %s\n\n", p.Name)
 
-	// Assign alias prefixes and colours for cross-actor arrows.
-	colors := []string{"#blue", "#green", "#orange", "#purple", "#gray", "#red"}
+	// Build phase lookup: state -> phase name.
+	phaseOf := map[State]string{}
+	for _, ph := range p.Phases {
+		for _, s := range ph.States {
+			phaseOf[s] = ph.Name
+		}
+	}
+	hasPhases := len(p.Phases) > 0
+
+	// Actor alias mapping.
+	aliases := []string{"B", "C", "R", "D", "E", "F"}
 	actorAlias := make(map[string]string)
-	aliases := []string{"D", "A", "C", "E", "F", "G"}
+
 	for i, a := range p.Actors {
 		alias := aliases[i%len(aliases)]
 		actorAlias[a.Name] = alias
 
 		fmt.Fprintf(&b, "state \"%s\" as %s {\n", a.Name, alias)
-		fmt.Fprintf(&b, "  [*] --> %s_%s\n", alias, sanitisePUML(string(a.Initial)))
 
-		for _, t := range a.Transitions {
-			from := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(t.From)))
-			to := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(t.To)))
-			label := transitionLabel(t)
-			fmt.Fprintf(&b, "  %s --> %s : %s\n", from, to, label)
+		if hasPhases {
+			// Group this actor's states by phase.
+			actorStates := collectStates(a)
+			statesByPhase := map[string][]State{}
+			var ungrouped []State
+			for _, s := range actorStates {
+				if ph, ok := phaseOf[s]; ok {
+					statesByPhase[ph] = append(statesByPhase[ph], s)
+				} else {
+					ungrouped = append(ungrouped, s)
+				}
+			}
+
+			// Emit phase superstates in definition order.
+			for _, ph := range p.Phases {
+				states := statesByPhase[ph.Name]
+				if len(states) == 0 {
+					continue
+				}
+
+				phAlias := fmt.Sprintf("%s_%s", alias, sanitisePUML(ph.Name))
+				fmt.Fprintf(&b, "  state \"%s\" as %s {\n", ph.Name, phAlias)
+
+				// Initial state: first state in this phase that matches
+				// the actor's initial state, or the first listed state.
+				initial := states[0]
+				for _, s := range states {
+					if s == a.Initial {
+						initial = s
+						break
+					}
+				}
+				fmt.Fprintf(&b, "    [*] --> %s_%s\n", alias, sanitisePUML(string(initial)))
+
+				// Transitions within this phase.
+				for _, t := range a.Transitions {
+					fromPhase := phaseOf[t.From]
+					toPhase := phaseOf[t.To]
+					if fromPhase == ph.Name && toPhase == ph.Name {
+						from := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(t.From)))
+						to := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(t.To)))
+						fmt.Fprintf(&b, "    %s --> %s : %s\n", from, to, transitionLabel(t))
+					}
+				}
+				b.WriteString("  }\n\n")
+			}
+
+			// Cross-phase transitions.
+			for _, t := range a.Transitions {
+				fromPhase := phaseOf[t.From]
+				toPhase := phaseOf[t.To]
+				if fromPhase != toPhase {
+					from := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(t.From)))
+					to := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(t.To)))
+					fmt.Fprintf(&b, "  %s --> %s : %s\n", from, to, transitionLabel(t))
+				}
+			}
+
+			// Ungrouped states.
+			for _, s := range ungrouped {
+				sid := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(s)))
+				fmt.Fprintf(&b, "  state %s\n", sid)
+			}
+		} else {
+			// No phases — flat diagram.
+			fmt.Fprintf(&b, "  [*] --> %s_%s\n", alias, sanitisePUML(string(a.Initial)))
+			for _, t := range a.Transitions {
+				from := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(t.From)))
+				to := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(t.To)))
+				fmt.Fprintf(&b, "  %s --> %s : %s\n", from, to, transitionLabel(t))
+			}
 		}
+
 		b.WriteString("}\n\n")
 	}
 
-	// Cross-actor interaction arrows from sends.
+	// Cross-actor interaction arrows.
+	colors := []string{"#blue", "#green", "#orange", "#purple", "#gray", "#red"}
 	b.WriteString("' === Cross-actor interactions ===\n\n")
 	colorIdx := 0
 	for _, a := range p.Actors {
@@ -48,7 +126,6 @@ func (p *Protocol) ExportPlantUML(w io.Writer) error {
 			for _, s := range t.Sends {
 				dstAlias := actorAlias[s.To]
 				from := fmt.Sprintf("%s_%s", srcAlias, sanitisePUML(string(t.From)))
-				// Find the receiving transition's target state.
 				to := findRecvState(p, s.To, s.Msg, dstAlias)
 				color := colors[colorIdx%len(colors)]
 				label := string(s.Msg)
@@ -66,7 +143,6 @@ func (p *Protocol) ExportPlantUML(w io.Writer) error {
 	}
 
 	b.WriteString("\n@enduml\n")
-
 	_, err := io.WriteString(w, b.String())
 	return err
 }
@@ -98,7 +174,6 @@ func findRecvState(p *Protocol, actorName string, msg MsgType, alias string) str
 			}
 		}
 	}
-	// Fallback: use actor initial state.
 	return fmt.Sprintf("%s_%s", alias, "unknown")
 }
 

@@ -668,6 +668,49 @@ operators:
     expr: 'IF a < b THEN a ELSE b'
     desc: minimum of two values
 
+# Phases group states for hierarchical diagramming and TLA+ splitting.
+# The names here become PlantUML superstates. For TLA+ export, each
+# phase generates an independent spec with only its relevant variables.
+phases:
+  Pairing:
+    # Backend pairing states
+    - Idle
+    - GenerateToken
+    - RegisterRelay
+    - WaitingForClient
+    - DeriveSecret
+    - SendAck
+    - WaitingForCode
+    - ValidateCode
+    - StorePaired
+    - Paired
+    - AuthCheck
+    - SessionActive
+    # Client pairing states
+    - ScanQR
+    - ConnectRelay
+    - GenKeyPair
+    - WaitAck
+    - E2EReady
+    - ShowCode
+    - WaitPairComplete
+    - Reconnect
+    - SendAuth
+  Transport:
+    # Backend transport states
+    - RelayConnected
+    - LANOffered
+    - LANActive
+    - LANDegraded
+    - RelayBackoff
+    # Client transport states
+    - LANConnecting
+    - LANVerifying
+    - RelayFallback
+    # Relay states
+    - BackendRegistered
+    - Bridged
+
 # The adversary is only active during the pairing phase. Once the
 # backend reaches transport states, the adversary self-disables.
 # This prevents combinatorial explosion from adversary interleavings
