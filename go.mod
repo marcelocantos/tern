@@ -12,6 +12,7 @@ require (
 )
 
 require (
+	github.com/arr-ai/frozen v1.11.0 // indirect
 	github.com/caddyserver/zerossl v0.1.5 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect

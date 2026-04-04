@@ -167,10 +167,123 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 	fmt.Fprintf(&b, "\t\tChannelBound: %d,\n", p.ChannelBound)
 	fmt.Fprintf(&b, "\t\tOneShot: %v,\n", p.OneShot)
 
-	b.WriteString("\t}\n}\n")
+	b.WriteString("\t}\n}\n\n")
+
+	// --- Structs ---
+	needsFrozen := false
+	for _, sd := range p.Structs {
+		for _, f := range sd.Fields {
+			if f.Type == VarSetString {
+				needsFrozen = true
+			}
+		}
+	}
+
+	if len(p.Structs) > 0 {
+		b.WriteString("// --- Structs ---\n\n")
+		for _, sd := range p.Structs {
+			if sd.Desc != "" {
+				fmt.Fprintf(&b, "// %s\n", sd.Desc)
+			}
+			fmt.Fprintf(&b, "type %s struct {\n", goCamel(sd.Name))
+			for _, f := range sd.Fields {
+				fmt.Fprintf(&b, "\t%s %s", goCamel(f.Name), goType(f.Type))
+				if f.Desc != "" {
+					fmt.Fprintf(&b, " // %s", f.Desc)
+				}
+				b.WriteString("\n")
+			}
+			b.WriteString("}\n\n")
+
+			// Converter: vars map -> struct.
+			structName := goCamel(sd.Name)
+			fmt.Fprintf(&b, "// %sFromVars constructs a %s from a flat variable map.\n", structName, structName)
+			fmt.Fprintf(&b, "func %sFromVars(m map[string]any) %s {\n", structName, structName)
+			fmt.Fprintf(&b, "\treturn %s{\n", structName)
+			for _, f := range sd.Fields {
+				fmt.Fprintf(&b, "\t\t%s: %s,\n", goCamel(f.Name), goVarCast(f.Name, f.Type))
+			}
+			b.WriteString("\t}\n}\n\n")
+
+			// Converter: struct -> vars map.
+			fmt.Fprintf(&b, "// ToVars writes a %s into a flat variable map.\n", structName)
+			fmt.Fprintf(&b, "func (s %s) ToVars(vars map[string]any) {\n", structName)
+			for _, f := range sd.Fields {
+				fmt.Fprintf(&b, "\tvars[%q] = s.%s\n", f.Name, goCamel(f.Name))
+			}
+			b.WriteString("}\n\n")
+		}
+	}
+
+	// --- Typed variable state ---
+	if len(p.Vars) > 0 {
+		b.WriteString("// --- Variable state ---\n\n")
+		b.WriteString("// Vars holds the complete protocol variable state.\n")
+		b.WriteString("type Vars struct {\n")
+		for _, v := range p.Vars {
+			fmt.Fprintf(&b, "\t%s %s", goCamel(v.Name), goType(v.Type))
+			if v.Desc != "" {
+				fmt.Fprintf(&b, " // %s", v.Desc)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("}\n\n")
+
+		// FromMap converter.
+		b.WriteString("// VarsFromMap constructs Vars from a flat variable map.\n")
+		b.WriteString("func VarsFromMap(m map[string]any) Vars {\n")
+		b.WriteString("\treturn Vars{\n")
+		for _, v := range p.Vars {
+			fmt.Fprintf(&b, "\t\t%s: %s,\n", goCamel(v.Name), goVarCast(v.Name, v.Type))
+		}
+		b.WriteString("\t}\n}\n\n")
+
+		// ToMap converter.
+		b.WriteString("// ToMap writes Vars into a flat variable map.\n")
+		b.WriteString("func (v Vars) ToMap(m map[string]any) {\n")
+		for _, v := range p.Vars {
+			fmt.Fprintf(&b, "\tm[%q] = v.%s\n", v.Name, goCamel(v.Name))
+		}
+		b.WriteString("}\n\n")
+	}
+
+	// Import annotation for frozen if needed.
+	if needsFrozen {
+		b.WriteString("// Note: this package requires github.com/arr-ai/frozen\n")
+	}
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// goType maps a VarType to its Go type string.
+func goType(t VarType) string {
+	switch t {
+	case VarInt:
+		return "int"
+	case VarBool:
+		return "bool"
+	case VarSetString:
+		return "frozen.Set[string]"
+	default:
+		return "string"
+	}
+}
+
+// goVarCast generates a type assertion expression for reading from a map[string]any named "m".
+func goVarCast(varName string, t VarType) string {
+	key := fmt.Sprintf("m[%q]", varName)
+	// The map parameter in generated functions is always named "m".
+	switch t {
+	case VarInt:
+		return key + ".(int)"
+	case VarBool:
+		return key + ".(bool)"
+	case VarSetString:
+		return key + ".(frozen.Set[string])"
+	default:
+		return key + ".(string)"
+	}
 }
 
 // goConstPrefix maps actor names to Go constant prefixes.
