@@ -6,13 +6,17 @@
 # The relay is always connected. Direct paths come and go.
 # Traffic flows through the best healthy path at all times.
 #
+# This state machine is the COMPLETE specification of a correctly
+# running system. All resource lifecycle (dispatcher bindings, monitor
+# targets, signal state) is modelled as state variables. The Go/Swift/
+# Kotlin/TypeScript executors are mechanical: execute the transition,
+# diff the state, rebind any changed resources. No independent logic.
+#
 # Retry strategy: exponential backoff with jitter on re-establishment
-# attempts. Health pings are fixed-interval (no backoff). The backoff
-# state is formally modelled so TLC can verify progress under all
-# retry schedules.
+# attempts. Health pings are fixed-interval (no backoff).
 
 name: PathSwitch
-one_shot: false    # continuous — runs for the lifetime of the session
+one_shot: false
 channel_bound: 3
 
 messages:
@@ -72,6 +76,10 @@ actors:
         updates:
           ping_failures: '0'
           backoff_level: '0'
+          active_path: '"lan"'
+          monitor_target: '"lan"'
+          dispatcher_path: '"lan"'
+          lan_signal: '"ready"'
 
       - from: LANOffered
         to: RelayConnected
@@ -79,7 +87,7 @@ actors:
         guard: challenge_invalid
 
       - from: LANOffered
-        to: RelayConnected
+        to: RelayBackoff
         on: offer_timeout
         updates:
           backoff_level: 'Min(backoff_level + 1, max_backoff_level)'
@@ -125,12 +133,14 @@ actors:
         guard: at_max_failures
         do: fallback_to_relay
         updates:
-          backoff_level: '1'
+          backoff_level: 'Min(backoff_level + 1, max_backoff_level)'
+          active_path: '"relay"'
+          monitor_target: '"none"'
+          dispatcher_path: '"relay"'
+          lan_signal: '"pending"'
+          ping_failures: '0'
 
       # --- Backoff before re-advertisement ---
-      # The backend waits with exponential backoff before trying LAN again.
-      # backoff_level determines the delay: 2^level * base_interval,
-      # capped at max_backoff_level. Jitter is applied in implementation.
       - from: RelayBackoff
         to: LANOffered
         on: backoff_expired
@@ -141,8 +151,6 @@ actors:
               addr: lan_addr
               challenge: challenge_bytes
 
-      # Immediate re-offer if something external changes (e.g., new LAN
-      # server started). Resets backoff.
       - from: RelayBackoff
         to: LANOffered
         on: lan_server_changed
@@ -155,13 +163,11 @@ actors:
         updates:
           backoff_level: '0'
 
-      # --- Re-advertisement from RelayConnected (first time or after
-      # successful LAN session ended normally) ---
+      # --- Re-advertisement from clean relay state ---
       - from: RelayConnected
         to: LANOffered
         on: readvertise_tick
         guard: lan_server_available
-
         sends:
           - to: client
             msg: lan_offer
@@ -203,10 +209,16 @@ actors:
         to: LANActive
         on: recv lan_confirm
         do: activate_lan
+        updates:
+          active_path: '"lan"'
+          dispatcher_path: '"lan"'
+          lan_signal: '"ready"'
 
       - from: LANVerifying
         to: RelayConnected
         on: verify_timeout
+        updates:
+          dispatcher_path: '"relay"'
 
       # --- Health monitoring ---
       - from: LANActive
@@ -220,6 +232,10 @@ actors:
         to: RelayFallback
         on: lan_error
         do: fallback_to_relay
+        updates:
+          active_path: '"relay"'
+          dispatcher_path: '"relay"'
+          lan_signal: '"pending"'
 
       # --- Relay fallback ---
       - from: RelayFallback
@@ -244,11 +260,15 @@ actors:
         to: Bridged
         on: client_connect
         do: bridge_streams
+        updates:
+          relay_bridge: '"active"'
 
       - from: Bridged
         to: BackendRegistered
         on: client_disconnect
         do: unbridge
+        updates:
+          relay_bridge: '"idle"'
 
       - from: Bridged
         to: Bridged
@@ -281,18 +301,35 @@ vars:
   max_ping_failures:
     initial: '3'
     desc: threshold before fallback
-  active_path:
-    initial: '"relay"'
-    desc: '"relay" or "lan" — which path is carrying traffic'
-  lan_server_addr:
-    initial: '"none"'
-    desc: LAN server listen address (backend only)
   backoff_level:
     initial: '0'
     desc: current exponential backoff level (0 = no backoff)
   max_backoff_level:
     initial: '5'
     desc: 'cap on backoff level (2^5 * base = 32x base interval)'
+
+  # --- Resource lifecycle state ---
+  # These variables track which path each resource is bound to.
+  # Transitions that change paths MUST update these. The executor
+  # diffs the state and rebinds any changed resources.
+  active_path:
+    initial: '"relay"'
+    desc: '"relay" or "lan" — which path carries application traffic'
+  dispatcher_path:
+    initial: '"relay"'
+    desc: 'which path the datagram dispatcher reads from ("relay", "lan", "none")'
+  monitor_target:
+    initial: '"none"'
+    desc: 'which path the health monitor pings ("lan", "none")'
+  lan_signal:
+    initial: '"pending"'
+    desc: 'LANReady notification state ("pending" = not yet, "ready" = closed/signalled)'
+  relay_bridge:
+    initial: '"idle"'
+    desc: 'relay bridge state ("active" = bridging, "idle" = backend registered but no client)'
+  lan_server_addr:
+    initial: '"none"'
+    desc: LAN server listen address (backend only)
 
 guards:
   challenge_valid: 'offer_challenge = challenge_bytes'
@@ -308,18 +345,14 @@ properties:
     kind: invariant
     expr: 'relay_state \in {relay_BackendRegistered, relay_Bridged}'
     desc: The relay registration is never lost while the session is active
-  - name: ExactlyOneActivePath
+  - name: PathConsistency
     kind: invariant
     expr: 'active_path \in {"relay", "lan"}'
-    desc: Traffic flows through exactly one path at any time
+    desc: Traffic flows through exactly one valid path
   - name: LANRequiresVerification
     kind: invariant
     expr: '(backend_state = backend_LANActive /\ client_state = client_LANActive) => challenge_bytes = offer_challenge'
     desc: LAN path is only active after successful challenge verification
-  - name: FallbackAlwaysSucceeds
-    kind: invariant
-    expr: '(backend_state = backend_RelayBackoff \/ client_state = client_RelayFallback) => relay_state \in {relay_Bridged, relay_BackendRegistered}'
-    desc: Falling back to relay always has a valid relay connection to fall back to
   - name: BackoffBounded
     kind: invariant
     expr: 'backoff_level <= max_backoff_level'
@@ -328,3 +361,31 @@ properties:
     kind: invariant
     expr: 'backend_state = backend_LANActive => backoff_level = 0'
     desc: Successful LAN establishment resets the backoff level
+  - name: DispatcherAlwaysBound
+    kind: invariant
+    expr: 'dispatcher_path \in {"relay", "lan"}'
+    desc: The datagram dispatcher is always reading from a valid path
+  - name: DispatcherMatchesActivePath
+    kind: invariant
+    expr: '(backend_state = backend_LANActive \/ client_state = client_LANActive) => dispatcher_path = "lan"'
+    desc: When LAN is active, the dispatcher reads from LAN
+  - name: DispatcherRelayOnFallback
+    kind: invariant
+    expr: '(backend_state = backend_RelayBackoff \/ client_state = client_RelayFallback) => dispatcher_path = "relay"'
+    desc: After fallback, the dispatcher reads from relay
+  - name: MonitorOnlyWhenLANActive
+    kind: invariant
+    expr: 'monitor_target = "lan" => backend_state \in {backend_LANActive, backend_LANDegraded}'
+    desc: Health monitor only pings when LAN is active or degraded
+  - name: MonitorOffOnFallback
+    kind: invariant
+    expr: 'backend_state = backend_RelayBackoff => monitor_target = "none"'
+    desc: Health monitor stops on fallback
+  - name: LANSignalReady
+    kind: invariant
+    expr: '(backend_state = backend_LANActive /\ lan_signal = "ready") => active_path = "lan"'
+    desc: LANReady signal is only "ready" when LAN is the active path
+  - name: LANSignalPendingOnFallback
+    kind: invariant
+    expr: 'backend_state = backend_RelayBackoff => lan_signal = "pending"'
+    desc: LANReady resets to pending on fallback
