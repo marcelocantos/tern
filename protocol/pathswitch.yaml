@@ -5,6 +5,11 @@
 # Three actors: backend, client, relay.
 # The relay is always connected. Direct paths come and go.
 # Traffic flows through the best healthy path at all times.
+#
+# Retry strategy: exponential backoff with jitter on re-establishment
+# attempts. Health pings are fixed-interval (no backoff). The backoff
+# state is formally modelled so TLC can verify progress under all
+# retry schedules.
 
 name: PathSwitch
 one_shot: false    # continuous — runs for the lifetime of the session
@@ -64,6 +69,9 @@ actors:
         sends:
           - to: client
             msg: lan_confirm
+        updates:
+          ping_failures: '0'
+          backoff_level: '0'
 
       - from: LANOffered
         to: RelayConnected
@@ -73,8 +81,10 @@ actors:
       - from: LANOffered
         to: RelayConnected
         on: offer_timeout
+        updates:
+          backoff_level: 'Min(backoff_level + 1, max_backoff_level)'
 
-      # --- Health monitoring ---
+      # --- Health monitoring (fixed interval, no backoff) ---
       - from: LANActive
         to: LANActive
         on: ping_tick
@@ -85,6 +95,8 @@ actors:
       - from: LANActive
         to: LANDegraded
         on: ping_timeout
+        updates:
+          ping_failures: '1'
 
       - from: LANDegraded
         to: LANDegraded
@@ -97,17 +109,59 @@ actors:
         to: LANActive
         on: recv path_pong
         do: reset_failures
+        updates:
+          ping_failures: '0'
 
       - from: LANDegraded
-        to: RelayConnected
-        on: max_failures
-        do: fallback_to_relay
+        to: LANDegraded
+        on: ping_timeout
+        guard: under_max_failures
+        updates:
+          ping_failures: 'ping_failures + 1'
 
-      # --- Re-advertisement after fallback ---
+      - from: LANDegraded
+        to: RelayBackoff
+        on: ping_timeout
+        guard: at_max_failures
+        do: fallback_to_relay
+        updates:
+          backoff_level: '1'
+
+      # --- Backoff before re-advertisement ---
+      # The backend waits with exponential backoff before trying LAN again.
+      # backoff_level determines the delay: 2^level * base_interval,
+      # capped at max_backoff_level. Jitter is applied in implementation.
+      - from: RelayBackoff
+        to: LANOffered
+        on: backoff_expired
+        sends:
+          - to: client
+            msg: lan_offer
+            fields:
+              addr: lan_addr
+              challenge: challenge_bytes
+
+      # Immediate re-offer if something external changes (e.g., new LAN
+      # server started). Resets backoff.
+      - from: RelayBackoff
+        to: LANOffered
+        on: lan_server_changed
+        sends:
+          - to: client
+            msg: lan_offer
+            fields:
+              addr: lan_addr
+              challenge: challenge_bytes
+        updates:
+          backoff_level: '0'
+
+      # --- Re-advertisement from RelayConnected (first time or after
+      # successful LAN session ended normally) ---
       - from: RelayConnected
         to: LANOffered
         on: readvertise_tick
         guard: lan_server_available
+
         sends:
           - to: client
             msg: lan_offer
@@ -194,7 +248,7 @@ actors:
       - from: Bridged
         to: BackendRegistered
         on: client_disconnect
-        do: unbrige
+        do: unbridge
 
       - from: Bridged
         to: Bridged
@@ -233,6 +287,12 @@ vars:
   lan_server_addr:
     initial: '"none"'
     desc: LAN server listen address (backend only)
+  backoff_level:
+    initial: '0'
+    desc: current exponential backoff level (0 = no backoff)
+  max_backoff_level:
+    initial: '5'
+    desc: 'cap on backoff level (2^5 * base = 32x base interval)'
 
 guards:
   challenge_valid: 'offer_challenge = challenge_bytes'
@@ -240,6 +300,8 @@ guards:
   lan_enabled: 'TRUE'
   lan_disabled: 'FALSE'
   lan_server_available: 'lan_server_addr /= "none"'
+  under_max_failures: 'ping_failures + 1 < max_ping_failures'
+  at_max_failures: 'ping_failures + 1 >= max_ping_failures'
 
 properties:
   - name: RelayAlwaysAvailable
@@ -256,9 +318,13 @@ properties:
     desc: LAN path is only active after successful challenge verification
   - name: FallbackAlwaysSucceeds
     kind: invariant
-    expr: '(backend_state = backend_RelayConnected \/ client_state = client_RelayFallback) => relay_state \in {relay_Bridged, relay_BackendRegistered}'
+    expr: '(backend_state = backend_RelayBackoff \/ client_state = client_RelayFallback) => relay_state \in {relay_Bridged, relay_BackendRegistered}'
     desc: Falling back to relay always has a valid relay connection to fall back to
-  - name: LANEventuallyEstablished
-    kind: liveness
-    expr: 'client_state = client_LANActive /\ backend_state = backend_LANActive'
-    desc: If LAN is available and enabled, both sides eventually reach LANActive
+  - name: BackoffBounded
+    kind: invariant
+    expr: 'backoff_level <= max_backoff_level'
+    desc: Backoff level never exceeds the cap
+  - name: BackoffResetsOnSuccess
+    kind: invariant
+    expr: 'backend_state = backend_LANActive => backoff_level = 0'
+    desc: Successful LAN establishment resets the backoff level

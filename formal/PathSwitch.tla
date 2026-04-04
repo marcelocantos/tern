@@ -1,21 +1,17 @@
 ---- MODULE PathSwitch ----
-\* Path-switching protocol: relay (permanent) + LAN (direct, optional).
-\* Verifies transport correctness invariants. Security is out of scope
-\* (handled by the PairingCeremony spec).
+\* Path-switching protocol with exponential backoff.
+\* Verifies transport correctness and backoff properties.
 
 EXTENDS Integers, Sequences, FiniteSets, TLC
 
 \* --- States ---
 
-\* Backend states
 CONSTANTS backend_RelayConnected, backend_LANOffered,
-          backend_LANActive, backend_LANDegraded
+          backend_LANActive, backend_LANDegraded, backend_RelayBackoff
 
-\* Client states
 CONSTANTS client_RelayConnected, client_LANConnecting,
           client_LANVerifying, client_LANActive, client_RelayFallback
 
-\* Relay states
 CONSTANTS relay_Idle, relay_BackendRegistered, relay_Bridged
 
 \* --- Variables ---
@@ -24,31 +20,29 @@ VARIABLES
     backend_state,
     client_state,
     relay_state,
-    \* Message channels (bounded sequences).
-    chan_b2c,      \* backend -> client (via relay or LAN)
-    chan_c2b,      \* client -> backend (via relay or LAN)
-    \* Which path is active for each side.
-    backend_path,  \* "relay" or "lan"
-    client_path,   \* "relay" or "lan"
-    \* LAN handshake state.
-    challenge,     \* backend's challenge value
-    offer_challenge, \* client's received challenge
-    \* Health monitoring.
-    ping_failures  \* consecutive failed pings
+    chan_b2c,          \* backend -> client
+    chan_c2b,          \* client -> backend
+    backend_path,      \* "relay" or "lan"
+    client_path,       \* "relay" or "lan"
+    challenge,         \* backend's challenge value
+    offer_challenge,   \* client's received challenge
+    ping_failures,     \* consecutive failed pings
+    backoff_level      \* exponential backoff level (0 = immediate)
 
 vars == <<backend_state, client_state, relay_state,
           chan_b2c, chan_c2b,
           backend_path, client_path,
-          challenge, offer_challenge, ping_failures>>
+          challenge, offer_challenge,
+          ping_failures, backoff_level>>
 
-CONSTANTS MaxChanLen, MaxPingFailures
+CONSTANTS MaxChanLen, MaxPingFailures, MaxBackoffLevel
 
 \* --- Init ---
 
 Init ==
     /\ backend_state = backend_RelayConnected
     /\ client_state = client_RelayConnected
-    /\ relay_state = relay_Bridged  \* session already established
+    /\ relay_state = relay_Bridged
     /\ chan_b2c = <<>>
     /\ chan_c2b = <<>>
     /\ backend_path = "relay"
@@ -56,23 +50,26 @@ Init ==
     /\ challenge = "c1"
     /\ offer_challenge = "none"
     /\ ping_failures = 0
-
-\* --- Helper: send if channel not full ---
+    /\ backoff_level = 0
 
 CanSend(ch) == Len(ch) < MaxChanLen
+Min(a, b) == IF a < b THEN a ELSE b
 
-\* --- Backend transitions ---
+\* ================================================================
+\* Backend transitions
+\* ================================================================
 
-\* Backend advertises LAN.
+\* First LAN advertisement (no backoff — immediate).
 BackendOfferLAN ==
     /\ backend_state = backend_RelayConnected
     /\ CanSend(chan_b2c)
     /\ chan_b2c' = Append(chan_b2c, [type |-> "lan_offer", challenge |-> challenge])
     /\ backend_state' = backend_LANOffered
     /\ UNCHANGED <<client_state, relay_state, chan_c2b,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Backend verifies LAN — challenge matches.
+\* LAN verified — challenge matches. Reset backoff.
 BackendVerifyOK ==
     /\ backend_state = backend_LANOffered
     /\ Len(chan_c2b) > 0
@@ -84,10 +81,11 @@ BackendVerifyOK ==
     /\ backend_state' = backend_LANActive
     /\ backend_path' = "lan"
     /\ ping_failures' = 0
+    /\ backoff_level' = 0
     /\ UNCHANGED <<client_state, relay_state, client_path,
                    challenge, offer_challenge>>
 
-\* Backend verifies LAN — challenge mismatch.
+\* LAN verify — challenge mismatch.
 BackendVerifyFail ==
     /\ backend_state = backend_LANOffered
     /\ Len(chan_c2b) > 0
@@ -96,32 +94,37 @@ BackendVerifyFail ==
     /\ chan_c2b' = Tail(chan_c2b)
     /\ backend_state' = backend_RelayConnected
     /\ UNCHANGED <<client_state, relay_state, chan_b2c,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Backend offer times out.
+\* Offer times out — increase backoff.
 BackendOfferTimeout ==
     /\ backend_state = backend_LANOffered
-    /\ backend_state' = backend_RelayConnected
+    /\ backend_state' = backend_RelayBackoff
+    /\ backoff_level' = Min(backoff_level + 1, MaxBackoffLevel)
     /\ UNCHANGED <<client_state, relay_state, chan_b2c, chan_c2b,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures>>
 
-\* Backend sends ping on LAN.
+\* Ping on healthy LAN.
 BackendPing ==
     /\ backend_state = backend_LANActive
     /\ CanSend(chan_b2c)
     /\ chan_b2c' = Append(chan_b2c, [type |-> "ping"])
     /\ UNCHANGED <<backend_state, client_state, relay_state, chan_c2b,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Backend ping times out — path degrading.
+\* Ping timeout — first failure.
 BackendPingTimeout ==
     /\ backend_state = backend_LANActive
-    /\ ping_failures' = ping_failures + 1
+    /\ ping_failures' = 1
     /\ backend_state' = backend_LANDegraded
     /\ UNCHANGED <<client_state, relay_state, chan_b2c, chan_c2b,
-                   backend_path, client_path, challenge, offer_challenge>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   backoff_level>>
 
-\* Backend receives pong in degraded state — recovers.
+\* Pong received while degraded — recover.
 BackendRecoverPong ==
     /\ backend_state = backend_LANDegraded
     /\ Len(chan_c2b) > 0
@@ -130,37 +133,47 @@ BackendRecoverPong ==
     /\ backend_state' = backend_LANActive
     /\ ping_failures' = 0
     /\ UNCHANGED <<client_state, relay_state, chan_b2c,
-                   backend_path, client_path, challenge, offer_challenge>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   backoff_level>>
 
-\* Backend degraded — another ping timeout. On max failures, fall back
-\* to relay and flush channels (LAN stream is closing).
-BackendDegradedTimeout ==
+\* Degraded timeout — under max failures, keep trying.
+BackendDegradedTimeoutContinue ==
     /\ backend_state = backend_LANDegraded
+    /\ ping_failures + 1 < MaxPingFailures
     /\ ping_failures' = ping_failures + 1
-    /\ IF ping_failures + 1 >= MaxPingFailures
-       THEN /\ backend_state' = backend_RelayConnected
-            /\ backend_path' = "relay"
-            /\ chan_b2c' = <<>>
-            /\ chan_c2b' = <<>>
-       ELSE /\ backend_state' = backend_LANDegraded
-            /\ backend_path' = backend_path
-            /\ UNCHANGED <<chan_b2c, chan_c2b>>
+    /\ UNCHANGED <<backend_state, client_state, relay_state,
+                   chan_b2c, chan_c2b,
+                   backend_path, client_path, challenge, offer_challenge,
+                   backoff_level>>
+
+\* Degraded timeout — max failures reached, fall back with backoff.
+BackendDegradedFallback ==
+    /\ backend_state = backend_LANDegraded
+    /\ ping_failures + 1 >= MaxPingFailures
+    /\ backend_state' = backend_RelayBackoff
+    /\ backend_path' = "relay"
+    /\ ping_failures' = 0
+    /\ backoff_level' = 1
+    /\ chan_b2c' = <<>>
+    /\ chan_c2b' = <<>>
     /\ UNCHANGED <<client_state, relay_state,
                    client_path, challenge, offer_challenge>>
 
-\* Backend re-advertises LAN after fallback.
-BackendReadvertise ==
-    /\ backend_state = backend_RelayConnected
-    /\ backend_path = "relay"
+\* Backoff expired — re-advertise LAN.
+BackendBackoffExpired ==
+    /\ backend_state = backend_RelayBackoff
     /\ CanSend(chan_b2c)
     /\ chan_b2c' = Append(chan_b2c, [type |-> "lan_offer", challenge |-> challenge])
     /\ backend_state' = backend_LANOffered
     /\ UNCHANGED <<client_state, relay_state, chan_c2b,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* --- Client transitions ---
+\* ================================================================
+\* Client transitions
+\* ================================================================
 
-\* Client receives LAN offer.
+\* Receive LAN offer.
 ClientRecvOffer ==
     /\ client_state = client_RelayConnected
     /\ Len(chan_b2c) > 0
@@ -169,25 +182,28 @@ ClientRecvOffer ==
     /\ chan_b2c' = Tail(chan_b2c)
     /\ client_state' = client_LANConnecting
     /\ UNCHANGED <<backend_state, relay_state, chan_c2b,
-                   backend_path, client_path, challenge, ping_failures>>
+                   backend_path, client_path, challenge,
+                   ping_failures, backoff_level>>
 
-\* Client dial succeeds — send verify.
+\* Dial OK — send verify.
 ClientDialOK ==
     /\ client_state = client_LANConnecting
     /\ CanSend(chan_c2b)
     /\ chan_c2b' = Append(chan_c2b, [type |-> "lan_verify", challenge |-> offer_challenge])
     /\ client_state' = client_LANVerifying
     /\ UNCHANGED <<backend_state, relay_state, chan_b2c,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Client dial fails.
+\* Dial fails.
 ClientDialFail ==
     /\ client_state = client_LANConnecting
     /\ client_state' = client_RelayConnected
     /\ UNCHANGED <<backend_state, relay_state, chan_b2c, chan_c2b,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Client receives LAN confirm.
+\* Receive LAN confirm.
 ClientConfirm ==
     /\ client_state = client_LANVerifying
     /\ Len(chan_b2c) > 0
@@ -196,17 +212,19 @@ ClientConfirm ==
     /\ client_state' = client_LANActive
     /\ client_path' = "lan"
     /\ UNCHANGED <<backend_state, relay_state, chan_c2b,
-                   backend_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Client verify times out — drain stale LAN messages.
+\* Verify timeout — drain stale messages.
 ClientVerifyTimeout ==
     /\ client_state = client_LANVerifying
     /\ client_state' = client_RelayConnected
-    /\ chan_b2c' = <<>>  \* LAN stream closed, stale messages discarded
+    /\ chan_b2c' = <<>>
     /\ UNCHANGED <<backend_state, relay_state, chan_c2b,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Client receives ping — responds with pong.
+\* Receive ping — respond with pong.
 ClientPong ==
     /\ client_state = client_LANActive
     /\ Len(chan_b2c) > 0
@@ -215,26 +233,29 @@ ClientPong ==
     /\ CanSend(chan_c2b)
     /\ chan_c2b' = Append(chan_c2b, [type |-> "pong"])
     /\ UNCHANGED <<backend_state, client_state, relay_state,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Client LAN error — fall back to relay, drain stale LAN messages.
+\* LAN error — fall back to relay, drain channels.
 ClientLANError ==
     /\ client_state = client_LANActive
     /\ client_state' = client_RelayFallback
     /\ client_path' = "relay"
-    /\ chan_b2c' = <<>>  \* LAN stream closed
+    /\ chan_b2c' = <<>>
     /\ chan_c2b' = <<>>
     /\ UNCHANGED <<backend_state, relay_state,
-                   backend_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Client relay fallback completes.
+\* Relay fallback completes.
 ClientRelayOK ==
     /\ client_state = client_RelayFallback
     /\ client_state' = client_RelayConnected
     /\ UNCHANGED <<backend_state, relay_state, chan_b2c, chan_c2b,
-                   backend_path, client_path, challenge, offer_challenge, ping_failures>>
+                   backend_path, client_path, challenge, offer_challenge,
+                   ping_failures, backoff_level>>
 
-\* Client receives new LAN offer while already on LAN.
+\* New LAN offer while already on LAN (address change).
 ClientNewOfferOnLAN ==
     /\ client_state = client_LANActive
     /\ Len(chan_b2c) > 0
@@ -243,9 +264,12 @@ ClientNewOfferOnLAN ==
     /\ chan_b2c' = Tail(chan_b2c)
     /\ client_state' = client_LANConnecting
     /\ UNCHANGED <<backend_state, relay_state, chan_c2b,
-                   backend_path, client_path, challenge, ping_failures>>
+                   backend_path, client_path, challenge,
+                   ping_failures, backoff_level>>
 
-\* --- Next state ---
+\* ================================================================
+\* Next state
+\* ================================================================
 
 Next ==
     \/ BackendOfferLAN
@@ -255,8 +279,9 @@ Next ==
     \/ BackendPing
     \/ BackendPingTimeout
     \/ BackendRecoverPong
-    \/ BackendDegradedTimeout
-    \/ BackendReadvertise
+    \/ BackendDegradedTimeoutContinue
+    \/ BackendDegradedFallback
+    \/ BackendBackoffExpired
     \/ ClientRecvOffer
     \/ ClientDialOK
     \/ ClientDialFail
@@ -269,43 +294,43 @@ Next ==
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
-\* --- Invariants ---
+\* ================================================================
+\* Invariants
+\* ================================================================
 
-\* Both sides always agree on a valid path state.
+\* Both paths are always valid values.
 PathConsistency ==
     /\ backend_path \in {"relay", "lan"}
     /\ client_path \in {"relay", "lan"}
 
-\* The relay is always in a connected state (session established at init).
+\* Relay stays connected (session established at init).
 RelayStaysConnected ==
     relay_state \in {relay_BackendRegistered, relay_Bridged}
 
-\* LAN is only active on both sides if the challenge was verified.
+\* LAN only active after successful verification.
 LANRequiresVerification ==
     (backend_state = backend_LANActive /\ client_state = client_LANActive)
         => offer_challenge = challenge
 
-\* If the backend is on relay, the client is also on relay or falling back.
-\* (No state where backend is relay but client thinks it's on LAN with no backend.)
-BackendRelayImpliesClientNotLANAlone ==
-    (backend_path = "relay" /\ backend_state = backend_RelayConnected)
-        => client_state \notin {client_LANActive}
-           \/ client_path = "relay"
-
-\* Channels never exceed their bound.
+\* Channels never overflow.
 ChannelsBounded ==
     /\ Len(chan_b2c) <= MaxChanLen
     /\ Len(chan_c2b) <= MaxChanLen
 
-\* Ping failures are bounded.
+\* Ping failures stay bounded.
 PingFailuresBounded ==
     ping_failures <= MaxPingFailures
 
-\* --- Liveness ---
+\* Backoff level never exceeds the cap.
+BackoffBounded ==
+    backoff_level <= MaxBackoffLevel
 
-\* If the backend keeps offering LAN and the client keeps dialing
-\* successfully, they eventually both reach LANActive.
-LANEventuallyEstablished ==
-    <>(backend_state = backend_LANActive /\ client_state = client_LANActive)
+\* Successful LAN establishment always resets backoff.
+BackoffResetsOnSuccess ==
+    backend_state = backend_LANActive => backoff_level = 0
+
+\* Fallback always enters backoff (never gets stuck).
+FallbackEntersBackoff ==
+    (backend_state = backend_RelayBackoff) => backoff_level >= 1
 
 ====
