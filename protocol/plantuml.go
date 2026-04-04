@@ -140,9 +140,7 @@ func (p *Protocol) ExportPlantUMLActors(w io.Writer, titleSuffix string, actors 
 	}
 
 	// Cross-actor interaction arrows.
-	colors := []string{"#blue", "#green", "#orange", "#purple", "#gray", "#red"}
 	b.WriteString("' === Cross-actor interactions ===\n\n")
-	colorIdx := 0
 	for _, a := range p.Actors {
 		if !includeActor(a.Name) {
 			continue
@@ -156,7 +154,6 @@ func (p *Protocol) ExportPlantUMLActors(w io.Writer, titleSuffix string, actors 
 				dstAlias := actorAlias[s.To]
 				from := fmt.Sprintf("%s_%s", srcAlias, sanitisePUML(string(t.From)))
 				to := findRecvState(p, s.To, s.Msg, dstAlias)
-				color := colors[colorIdx%len(colors)]
 				label := string(s.Msg)
 				if len(s.Fields) > 0 {
 					var fields []string
@@ -165,8 +162,7 @@ func (p *Protocol) ExportPlantUMLActors(w io.Writer, titleSuffix string, actors 
 					}
 					label += "\\n{" + strings.Join(fields, ", ") + "}"
 				}
-				fmt.Fprintf(&b, "%s -[%s,dashed]-> %s : %s\n", from, color, to, label)
-				colorIdx++
+				fmt.Fprintf(&b, "%s -[#888,dashed]-> %s : %s\n", from, to, label)
 			}
 		}
 	}
