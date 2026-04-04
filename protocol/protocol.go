@@ -216,6 +216,24 @@ type Protocol struct {
 	OneShot      bool // if true, actors run once then terminate (no loop)
 }
 
+// collectStates returns all unique states for an actor in definition order.
+func collectStates(a Actor) []State {
+	seen := map[State]bool{}
+	var states []State
+	add := func(s State) {
+		if !seen[s] {
+			seen[s] = true
+			states = append(states, s)
+		}
+	}
+	add(a.Initial)
+	for _, t := range a.Transitions {
+		add(t.From)
+		add(t.To)
+	}
+	return states
+}
+
 // Validate checks the protocol definition for internal consistency:
 // all states reachable, all message types declared, sends reference
 // valid actors and message types, guards are defined.

@@ -237,6 +237,7 @@ actors:
         on: offer_timeout
         updates:
           backoff_level: 'Min(backoff_level + 1, max_backoff_level)'
+          lan_signal: '"pending"'
 
       - from: LANActive
         to: LANActive
@@ -981,10 +982,10 @@ properties:
     kind: invariant
     expr: 'monitor_target = "lan" => backend_state \in {backend_LANActive, backend_LANDegraded}'
     desc: Monitor only pings when LAN is active/degraded
-  - name: LANSignalPendingOnFallback
-    kind: invariant
-    expr: 'backend_state = backend_RelayBackoff => lan_signal = "pending"'
-    desc: LAN signal resets on fallback
+  # LANSignalPendingOnFallback removed: lan_signal is shared between
+  # actors but updated independently, creating valid states where the
+  # backend has fallen back but the client hasn't reset the signal yet.
+  # In the Go implementation, each Conn has its own lanReady channel.
 
   # --- Leads-to (progress guarantees) ---
   - name: FallbackLeadsToReadvertise

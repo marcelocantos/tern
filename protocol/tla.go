@@ -10,39 +10,84 @@ import (
 	"strings"
 )
 
-// ExportTLA writes a TLA+ spec for the protocol to w. The spec uses
-// PlusCal for readability, with one process per actor and message
-// channels between them. A Dolev-Yao adversary process models an
-// active network attacker with configurable capabilities.
+// ExportTLA writes a TLA+ spec for the protocol. If phaseName is empty,
+// the full protocol is emitted. If phaseName matches a defined phase,
+// only that phase's transitions and variables are emitted — other
+// variables are omitted entirely, dramatically reducing the state space.
 func (p *Protocol) ExportTLA(w io.Writer) error {
+	return p.ExportTLAPhase(w, "")
+}
+
+// ExportTLAPhase writes a TLA+ spec for a specific phase, or the full
+// protocol if phaseName is empty.
+func (p *Protocol) ExportTLAPhase(w io.Writer, phaseName string) error {
+	var phase *Phase
+	if phaseName != "" {
+		for i := range p.Phases {
+			if p.Phases[i].Name == phaseName {
+				phase = &p.Phases[i]
+				break
+			}
+		}
+		if phase == nil {
+			return fmt.Errorf("phase %q not found", phaseName)
+		}
+	}
+
 	var b strings.Builder
 
+	moduleName := sanitiseTLA(p.Name)
+	if phase != nil {
+		moduleName = sanitiseTLA(p.Name) + "_" + sanitiseTLA(phase.Name)
+	}
+
 	b.WriteString("---- MODULE ")
-	b.WriteString(sanitiseTLA(p.Name))
+	b.WriteString(moduleName)
 	b.WriteString(" ----\n")
 	b.WriteString("\\* Auto-generated from protocol definition. Do not edit.\n")
-	b.WriteString("\\* Source of truth: internal/protocol/ Go definition.\n\n")
-	b.WriteString("EXTENDS Integers, Sequences, FiniteSets, TLC\n\n")
+	if phase != nil {
+		fmt.Fprintf(&b, "\\* Phase: %s\n", phase.Name)
+	}
+	b.WriteString("\nEXTENDS Integers, Sequences, FiniteSets, TLC\n\n")
 
-	writeStateConstants(&b, p)
+	// Build phase state set for filtering transitions.
+	phaseStates := map[State]bool{}
+	if phase != nil {
+		for _, s := range phase.States {
+			phaseStates[s] = true
+		}
+	}
+
+	// Build phase var set for filtering variables.
+	phaseVars := map[string]bool{}
+	if phase != nil {
+		for _, v := range phase.Vars {
+			phaseVars[v] = true
+		}
+	}
+
+	writeStateConstants(&b, p, phaseStates)
 	writeMsgConstants(&b, p)
-	// Operators go before PlusCal — they are pure functions.
 	writeOperators(&b, p)
 
-	// PlusCal algorithm.
 	b.WriteString("(*--algorithm ")
-	b.WriteString(sanitiseTLA(p.Name))
+	b.WriteString(moduleName)
 	b.WriteString("\n\n")
 
-	writeVariables(&b, p)
-	writeProcesses(&b, p)
-	writeAdversary(&b, p)
+	writeVariables(&b, p, phase, phaseVars)
+	writeProcesses(&b, p, phase, phaseStates)
+
+	// Only include adversary if this phase has it enabled (or no phase filter).
+	includeAdversary := phase == nil || phase.Adversary
+	if includeAdversary {
+		writeAdversary(&b, p)
+	}
 
 	b.WriteString("end algorithm; *)\n")
 	b.WriteString("\\* BEGIN TRANSLATION\n")
 	b.WriteString("\\* END TRANSLATION\n\n")
 
-	writeProperties(&b, p)
+	writeProperties(&b, p, phase, phaseVars)
 
 	b.WriteString("====\n")
 
@@ -50,19 +95,38 @@ func (p *Protocol) ExportTLA(w io.Writer) error {
 	return err
 }
 
-func writeStateConstants(b *strings.Builder, p *Protocol) {
+func writeStateConstants(b *strings.Builder, p *Protocol, phaseStates map[State]bool) {
 	for _, a := range p.Actors {
 		states := collectStates(a)
 		b.WriteString("\\* States for ")
 		b.WriteString(a.Name)
 		b.WriteString("\n")
 		for _, s := range states {
+			// In phase mode, only emit states in the phase + immediate
+			// neighbours (for initial/terminal state references).
+			if len(phaseStates) > 0 && !phaseStates[s] && !isNeighbour(a, s, phaseStates) {
+				continue
+			}
 			fmt.Fprintf(b, "%s_%s == \"%s_%s\"\n",
 				sanitiseTLA(a.Name), sanitiseTLA(string(s)),
 				a.Name, s)
 		}
 		b.WriteString("\n")
 	}
+}
+
+// isNeighbour returns true if state s is the source or target of a
+// transition where the other end is in phaseStates.
+func isNeighbour(a Actor, s State, phaseStates map[State]bool) bool {
+	for _, t := range a.Transitions {
+		if t.From == s && phaseStates[t.To] {
+			return true
+		}
+		if t.To == s && phaseStates[t.From] {
+			return true
+		}
+	}
+	return false
 }
 
 func writeMsgConstants(b *strings.Builder, p *Protocol) {
@@ -99,30 +163,30 @@ func writeOperators(b *strings.Builder, p *Protocol) {
 	b.WriteString("\n")
 }
 
-// Guard expressions are inlined into await clauses (see writeTransitionAwait)
-// to avoid TLA+ operator ordering issues with TRANSLATION-block variables.
-
-func writeVariables(b *strings.Builder, p *Protocol) {
+func writeVariables(b *strings.Builder, p *Protocol, phase *Phase, phaseVars map[string]bool) {
 	b.WriteString("variables\n")
 
-	// Per-actor state variable.
 	for _, a := range p.Actors {
 		fmt.Fprintf(b, "    %s_state = %s_%s,\n",
 			sanitiseTLA(a.Name),
-			sanitiseTLA(a.Name), sanitiseTLA(string(a.Initial)))
+			sanitiseTLA(a.Name), sanitiseTLA(string(initialForPhase(a, phase))))
 	}
 
-	// Channel per message route (from->to).
 	channels := channelPairs(p)
 	for _, ch := range channels {
 		fmt.Fprintf(b, "    chan_%s_%s = <<>>,\n", ch.from, ch.to)
 	}
 
-	// Adversary knowledge.
-	b.WriteString("    adversary_knowledge = {},\n")
+	if phase == nil || phase.Adversary {
+		b.WriteString("    adversary_knowledge = {},\n")
+	}
 
-	// Auxiliary variables from protocol definition.
 	for _, v := range p.Vars {
+		// In phase mode, only include phase-relevant variables.
+		// Always include recv_msg — it's infrastructure for message reception.
+		if phase != nil && !phaseVars[v.Name] && v.Name != "recv_msg" {
+			continue
+		}
 		if v.Desc != "" {
 			fmt.Fprintf(b, "    \\* %s\n", v.Desc)
 		}
@@ -138,8 +202,61 @@ func writeVariables(b *strings.Builder, p *Protocol) {
 	}
 }
 
-func writeProcesses(b *strings.Builder, p *Protocol) {
+// initialForPhase returns the initial state for an actor in a given phase.
+// If the phase defines states, use the first phase state that appears as
+// a transition target from outside the phase (the entry point). Otherwise
+// use the actor's declared initial state.
+func initialForPhase(a Actor, phase *Phase) State {
+	if phase == nil {
+		return a.Initial
+	}
+
+	phaseStates := map[State]bool{}
+	for _, s := range phase.States {
+		phaseStates[s] = true
+	}
+
+	// If the actor's initial state is in this phase, use it.
+	if phaseStates[a.Initial] {
+		return a.Initial
+	}
+
+	// Find the first phase state that's a target from outside the phase.
+	for _, t := range a.Transitions {
+		if !phaseStates[t.From] && phaseStates[t.To] {
+			return t.To
+		}
+	}
+
+	// Fallback: first phase state.
+	for _, s := range phase.States {
+		for _, as := range collectStates(a) {
+			if as == s {
+				return s
+			}
+		}
+	}
+	return a.Initial
+}
+
+func writeProcesses(b *strings.Builder, p *Protocol, phase *Phase, phaseStates map[State]bool) {
 	for i, a := range p.Actors {
+		// Filter transitions to those relevant to this phase.
+		var transitions []Transition
+		for _, t := range a.Transitions {
+			if len(phaseStates) > 0 {
+				// Include if from OR to is in the phase.
+				if !phaseStates[t.From] && !phaseStates[t.To] {
+					continue
+				}
+			}
+			transitions = append(transitions, t)
+		}
+
+		if len(transitions) == 0 {
+			continue
+		}
+
 		fmt.Fprintf(b, "fair process %s = %d\n", sanitiseTLA(a.Name), i+1)
 		b.WriteString("begin\n")
 		fmt.Fprintf(b, "  %s_loop:\n", sanitiseTLA(a.Name))
@@ -150,7 +267,7 @@ func writeProcesses(b *strings.Builder, p *Protocol) {
 		b.WriteString("    either\n")
 
 		first := true
-		for _, t := range a.Transitions {
+		for _, t := range transitions {
 			if !first {
 				b.WriteString("    or\n")
 			}
@@ -192,9 +309,6 @@ func writeTransitionAwait(b *strings.Builder, p *Protocol, a *Actor, t *Transiti
 	}
 
 	if t.Guard != "" {
-		// Inline the guard expression. For recv transitions, substitute
-		// "recv_msg" with "Head(channel)" since at await-time the
-		// message hasn't been consumed into recv_msg yet.
 		expr := guardExpr(p, t.Guard)
 		if t.On.Kind == TriggerRecv {
 			fromActor := msgSender(p, t.On.Msg)
@@ -212,11 +326,10 @@ func guardExpr(p *Protocol, id GuardID) string {
 			return g.Expr
 		}
 	}
-	return string(id) // fallback
+	return string(id)
 }
 
 func writeTransitionBody(b *strings.Builder, p *Protocol, a *Actor, t *Transition) {
-	// Consume message: save to recv_msg, then Tail.
 	if t.On.Kind == TriggerRecv {
 		fromActor := msgSender(p, t.On.Msg)
 		chanName := channelName(fromActor, a.Name)
@@ -224,7 +337,6 @@ func writeTransitionBody(b *strings.Builder, p *Protocol, a *Actor, t *Transitio
 		fmt.Fprintf(b, "      %s := Tail(%s);\n", chanName, chanName)
 	}
 
-	// Send messages.
 	for _, s := range t.Sends {
 		chanName := channelName(a.Name, s.To)
 		fmt.Fprintf(b, "      %s := Append(%s, ", chanName, chanName)
@@ -232,12 +344,10 @@ func writeTransitionBody(b *strings.Builder, p *Protocol, a *Actor, t *Transitio
 		b.WriteString(");\n")
 	}
 
-	// Auxiliary variable updates.
 	for _, u := range t.Updates {
 		fmt.Fprintf(b, "      %s := %s;\n", sanitiseTLA(u.Var), u.Expr)
 	}
 
-	// State update.
 	fmt.Fprintf(b, "      %s_state := %s_%s;\n",
 		sanitiseTLA(a.Name),
 		sanitiseTLA(a.Name), sanitiseTLA(string(t.To)))
@@ -257,7 +367,6 @@ func writeRecord(b *strings.Builder, msg MsgType, fields map[string]string) {
 			fmt.Fprintf(b, ", %s |-> %s", k, fields[k])
 		}
 	}
-
 	b.WriteString("]")
 }
 
@@ -268,31 +377,25 @@ func writeAdversary(b *strings.Builder, p *Protocol) {
 	}
 
 	b.WriteString("\\* Dolev-Yao adversary: controls the network.\n")
-	b.WriteString("\\* Can read, drop, replay, and reorder messages on all channels.\n")
-	b.WriteString("\\* Cannot forge messages or break cryptographic primitives.\n")
-	b.WriteString("\\* Extended capabilities model specific attack scenarios.\n")
 	fmt.Fprintf(b, "fair process Adversary = %d\n", len(p.Actors)+1)
 	b.WriteString("begin\n")
 	b.WriteString("  adv_loop:\n")
 	b.WriteString("  while TRUE do\n")
-	// If an adversary guard is set, the adversary self-disables when the
-	// guard is false. This prevents combinatorial explosion from adversary
-	// interleavings with phases where the adversary has no meaningful actions.
+
 	if p.AdvGuard != "" {
 		fmt.Fprintf(b, "    await %s;\n", p.AdvGuard)
 	}
+
 	b.WriteString("    either\n")
 	b.WriteString("      skip \\* no-op: honest relay\n")
 
-	// Standard Dolev-Yao: eavesdrop, drop, replay per channel.
 	for _, ch := range channels {
 		chanName := fmt.Sprintf("chan_%s_%s", ch.from, ch.to)
 
 		b.WriteString("    or\n")
 		fmt.Fprintf(b, "      \\* Eavesdrop on %s -> %s\n", ch.from, ch.to)
 		fmt.Fprintf(b, "      await Len(%s) > 0;\n", chanName)
-		fmt.Fprintf(b, "      adversary_knowledge := adversary_knowledge \\union {Head(%s)};\n",
-			chanName)
+		fmt.Fprintf(b, "      adversary_knowledge := adversary_knowledge \\union {Head(%s)};\n", chanName)
 
 		b.WriteString("    or\n")
 		fmt.Fprintf(b, "      \\* Drop from %s -> %s\n", ch.from, ch.to)
@@ -311,7 +414,6 @@ func writeAdversary(b *strings.Builder, p *Protocol) {
 		b.WriteString("      end with;\n")
 	}
 
-	// Protocol-specific adversary actions.
 	for _, aa := range p.AdvActions {
 		b.WriteString("    or\n")
 		fmt.Fprintf(b, "      \\* %s: %s\n", aa.Name, aa.Desc)
@@ -324,12 +426,17 @@ func writeAdversary(b *strings.Builder, p *Protocol) {
 	b.WriteString("end process;\n\n")
 }
 
-func writeProperties(b *strings.Builder, p *Protocol) {
+func writeProperties(b *strings.Builder, p *Protocol, phase *Phase, phaseVars map[string]bool) {
 	if len(p.Properties) == 0 {
 		return
 	}
 	b.WriteString("\\* Verification properties\n")
 	for _, prop := range p.Properties {
+		// In phase mode, skip properties that reference non-phase variables.
+		if phase != nil && !propertyRelevant(prop, phaseVars, p.Vars) {
+			continue
+		}
+
 		if prop.Desc != "" {
 			fmt.Fprintf(b, "\\* %s\n", prop.Desc)
 		}
@@ -345,69 +452,62 @@ func writeProperties(b *strings.Builder, p *Protocol) {
 	b.WriteString("\n")
 }
 
+// propertyRelevant returns true if the property only references
+// variables that exist in this phase (phase vars + actor state vars +
+// channels). Returns false if ANY referenced variable is outside the phase.
+func propertyRelevant(prop Property, phaseVars map[string]bool, allVars []VarDef) bool {
+	if len(phaseVars) == 0 {
+		return true
+	}
+	expr := prop.Expr + prop.FromExpr + prop.ToExpr
+
+	// Check if any non-phase variable appears in the expression.
+	for _, v := range allVars {
+		if !phaseVars[v.Name] && v.Name != "recv_msg" && strings.Contains(expr, v.Name) {
+			return false
+		}
+	}
+	// Adversary variables are not in p.Vars — check explicitly.
+	if strings.Contains(expr, "adversary_knowledge") || strings.Contains(expr, "adversary_keys") {
+		// Only relevant if adversary variables exist (i.e., adversary phase).
+		if !phaseVars["adversary_keys"] {
+			return false
+		}
+	}
+	return true
+}
+
 // Helpers.
 
 type channelPair struct{ from, to string }
 
 func channelPairs(p *Protocol) []channelPair {
-	seen := map[channelPair]bool{}
+	seen := map[string]bool{}
 	var pairs []channelPair
 	for _, m := range p.Messages {
-		cp := channelPair{sanitiseTLA(m.From), sanitiseTLA(m.To)}
-		if !seen[cp] {
-			seen[cp] = true
-			pairs = append(pairs, cp)
+		key := m.From + "_" + m.To
+		if !seen[key] {
+			seen[key] = true
+			pairs = append(pairs, channelPair{from: m.From, to: m.To})
 		}
 	}
-	sort.Slice(pairs, func(i, j int) bool {
-		if pairs[i].from != pairs[j].from {
-			return pairs[i].from < pairs[j].from
-		}
-		return pairs[i].to < pairs[j].to
-	})
 	return pairs
 }
 
 func channelName(from, to string) string {
-	return fmt.Sprintf("chan_%s_%s", sanitiseTLA(from), sanitiseTLA(to))
+	return "chan_" + from + "_" + to
 }
 
-func msgSender(p *Protocol, mt MsgType) string {
+func msgSender(p *Protocol, msg MsgType) string {
 	for _, m := range p.Messages {
-		if m.Type == mt {
+		if m.Type == msg {
 			return m.From
 		}
 	}
 	return "unknown"
 }
 
-func collectStates(a Actor) []State {
-	seen := map[State]bool{}
-	var states []State
-	add := func(s State) {
-		if !seen[s] {
-			seen[s] = true
-			states = append(states, s)
-		}
-	}
-	add(a.Initial)
-	for _, t := range a.Transitions {
-		add(t.From)
-		add(t.To)
-	}
-	return states
-}
-
 func sanitiseTLA(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
-			r >= '0' && r <= '9', r == '_':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
-		}
-	}
-	return b.String()
+	r := strings.NewReplacer(" ", "_", "-", "_", ".", "_")
+	return r.Replace(s)
 }
