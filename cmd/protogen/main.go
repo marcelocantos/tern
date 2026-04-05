@@ -162,6 +162,19 @@ func main() {
 		}
 		fmt.Printf("wrote %s\n", g.path)
 	}
+
+	// Phase-specific TLA+ specs.
+	for _, ph := range p.Phases {
+		name := p.Name + "_" + strings.ReplaceAll(ph.Name, " ", "_")
+		path := filepath.Join("formal", name+".tla")
+		if err := writeFile(path, func(f *os.File) error {
+			return p.ExportTLAPhase(f, ph.Name)
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "generate %s: %v\n", path, err)
+			os.Exit(1)
+		}
+		fmt.Printf("wrote %s\n", path)
+	}
 }
 
 func writeFile(path string, fn func(*os.File) error) error {
