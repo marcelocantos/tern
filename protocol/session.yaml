@@ -90,9 +90,9 @@ events:
   lan_stream_data: 'data received on LAN stream'
   lan_stream_error: 'error reading LAN stream'
   lan_datagram: 'datagram received on LAN'
-  lan_dial_ok: 'LAN dial succeeded'
+  lan_dial_ok: 'LAN dial succeeded (client has connection resources)'
   lan_dial_failed: 'LAN dial failed'
-  lan_verify_ok: 'LAN verification succeeded (server side)'
+  lan_verify_ok: 'LAN challenge verified (backend has connection resources)'
   ping_timeout: 'health ping timed out (no pong)'
   ping_tick: 'health ping timer fired'
   backoff_expired: 'backoff timer expired'
@@ -477,6 +477,7 @@ actors:
             fields:
               addr: lan_addr
               challenge: challenge_bytes
+        emits: [send_lan_offer]
 
       - from: RelayBackoff
         to: LANOffered
@@ -489,6 +490,7 @@ actors:
               challenge: challenge_bytes
         updates:
           backoff_level: '0'
+        emits: [send_lan_offer]
 
       - from: RelayConnected
         to: LANOffered
@@ -500,6 +502,7 @@ actors:
             fields:
               addr: lan_addr
               challenge: challenge_bytes
+        emits: [send_lan_offer]
 
       # Re-enter pairing on disconnect.
       - from: RelayConnected

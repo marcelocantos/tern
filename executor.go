@@ -5,7 +5,10 @@ package tern
 
 import (
 	"context"
+	cryptoRand "crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"math"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/marcelocantos/tern/crypto"
 	"github.com/marcelocantos/tern/protocol"
+	"github.com/quic-go/quic-go"
 )
 
 // event carries an event ID plus optional payload into the executor.
@@ -55,8 +59,23 @@ type datagramData struct {
 	data []byte
 }
 
-// lanDialResult is the payload for EvLANDialOk.
+// lanDialResult is the payload for EventLanDialOk.
 type lanDialResult struct {
+	stream   io.ReadWriteCloser
+	dg       datagrammer
+	closer   io.Closer
+	opener   streamOpener
+	acceptor streamAcceptor
+}
+
+// lanOfferData carries the LAN offer received from the backend.
+type lanOfferData struct {
+	addr      string
+	challenge []byte
+}
+
+// lanVerifyData carries the verified LAN connection from the server.
+type lanVerifyData struct {
 	stream   io.ReadWriteCloser
 	dg       datagrammer
 	closer   io.Closer
@@ -92,6 +111,11 @@ type executor struct {
 	// LAN server (backend only — for re-advertisement).
 	lanServer  *LANServer
 	lanEnabled bool
+	lanTLS     *tls.Config
+	instanceID string
+
+	// Last LAN offer received (client-side, for dial).
+	lastOffer *lanOfferData
 
 	// LAN ready signal.
 	lanReady chan struct{}
@@ -241,6 +265,25 @@ func (e *executor) run() {
 					}
 				}
 				continue
+			}
+
+			// Stash event-specific data before the machine processes it.
+			if ev.id == EventRecvLanOffer {
+				if od, ok := ev.payload.(*lanOfferData); ok {
+					e.lastOffer = od
+				}
+			}
+			if ev.id == EventLanDialOk {
+				if ld, ok := ev.payload.(*lanDialResult); ok {
+					e.lan = newPath("lan", ld.stream, ld.dg, ld.closer, ld.opener, ld.acceptor)
+				}
+			}
+			if ev.id == EventRecvLanVerify {
+				if vd, ok := ev.payload.(*lanVerifyData); ok {
+					// Backend: LAN server verified the client's challenge.
+					// Install the LAN path before the machine transitions.
+					e.lan = newPath("lan", vd.stream, vd.dg, vd.closer, vd.opener, vd.acceptor)
+				}
 			}
 
 			cmds, err := e.machine.HandleEvent(ev.id)
@@ -572,7 +615,14 @@ func (e *executor) streamReader(ctx context.Context, p *path, dataEvent, errorEv
 			case msgApp:
 				e.submit(event{id: dataEvent, payload: &streamData{data: plaintext[1:]}})
 			case msgLANOffer:
-				e.submit(event{id: EventRecvLanOffer, payload: &streamData{data: plaintext[1:]}})
+				var offer lanOffer
+				if err := json.Unmarshal(plaintext[1:], &offer); err != nil {
+					slog.Warn("bad LAN offer", "err", err)
+					continue
+				}
+				e.submit(event{id: EventRecvLanOffer, payload: &lanOfferData{
+					addr: offer.Addr, challenge: offer.Challenge,
+				}})
 			case msgCutover:
 				slog.Debug("received cutover marker")
 			default:
@@ -648,18 +698,121 @@ func backoffDelay(level int) time.Duration {
 // sendLANOffer registers with the LAN server and sends the offer
 // via the relay control channel.
 func (e *executor) sendLANOffer() error {
-	offer, err := e.lanServer.registerConn(nil) // TODO: pass Conn ref
+	challenge := make([]byte, 32)
+	if _, err := cryptoRand.Read(challenge); err != nil {
+		return err
+	}
+
+	// Register with the LAN server. When the client verifies, the
+	// callback posts EventRecvLanVerify to the executor.
+	e.lanServer.mu.Lock()
+	e.lanServer.conns[e.instanceID] = &pendingLAN{
+		challenge: challenge,
+		onVerify: func(stream io.ReadWriteCloser, conn *quic.Conn) {
+			e.submit(event{id: EventRecvLanVerify, payload: &lanVerifyData{
+				stream:   stream,
+				dg:       conn,
+				closer:   quicCloser{conn},
+				opener:   quicOpener{conn},
+				acceptor: quicAcceptor{conn},
+			}})
+		},
+	}
+	e.lanServer.mu.Unlock()
+
+	offer := lanOffer{
+		Addr:      e.lanServer.addr,
+		Challenge: challenge,
+	}
+
+	// Send the offer as a control message via the relay stream.
+	return e.sendControl(msgLANOffer, offer)
+}
+
+// sendControl writes a framed control message on the relay stream.
+func (e *executor) sendControl(msgType byte, payload any) error {
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	_ = offer // TODO: sendControl via relay stream
-	return nil
+
+	framed := make([]byte, 1+len(data))
+	framed[0] = msgType
+	copy(framed[1:], data)
+
+	if e.channel != nil {
+		framed = e.channel.Encrypt(framed)
+	}
+
+	return writeMessage(e.relay.stream, framed)
 }
 
 // dialLAN attempts to connect to the LAN address from the most recent
-// offer. Posts EvLANDialOk or EvLANDialFailed.
+// offer. Posts EventLanDialOk or EventLanDialFailed.
 func (e *executor) dialLAN() {
-	// TODO: extract offer address from event payload, dial QUIC,
-	// exchange challenge, post result event.
-	e.submit(event{id: EventLanDialFailed})
+	offer := e.lastOffer
+	if offer == nil {
+		e.submit(event{id: EventLanDialFailed})
+		return
+	}
+
+	tlsConfig := e.lanTLS
+	if tlsConfig == nil {
+		tlsConfig = &tls.Config{
+			InsecureSkipVerify: true,
+			NextProtos:         []string{"tern-lan"},
+		}
+	} else {
+		tlsConfig = tlsConfig.Clone()
+		tlsConfig.NextProtos = []string{"tern-lan"}
+	}
+
+	ctx, cancel := context.WithTimeout(e.ctx, 5*time.Second)
+	defer cancel()
+
+	conn, err := quic.DialAddr(ctx, offer.addr, tlsConfig, &quic.Config{
+		EnableDatagrams: true,
+	})
+	if err != nil {
+		slog.Debug("LAN dial failed", "addr", offer.addr, "err", err)
+		e.submit(event{id: EventLanDialFailed})
+		return
+	}
+
+	stream, err := conn.OpenStream()
+	if err != nil {
+		conn.CloseWithError(1, "open stream failed")
+		e.submit(event{id: EventLanDialFailed})
+		return
+	}
+
+	// Send verification.
+	verify := lanVerify{
+		Challenge:  offer.challenge,
+		InstanceID: e.instanceID,
+	}
+	data, _ := json.Marshal(verify)
+	if err := writeMessage(stream, data); err != nil {
+		conn.CloseWithError(1, "write verify failed")
+		e.submit(event{id: EventLanDialFailed})
+		return
+	}
+
+	// Wait for confirmation.
+	resp, err := readMessage(stream)
+	if err != nil || string(resp) != "ok" {
+		conn.CloseWithError(1, "verify rejected")
+		e.submit(event{id: EventLanDialFailed})
+		return
+	}
+
+	slog.Info("LAN connection established", "addr", offer.addr)
+	e.submit(event{id: EventLanDialOk, payload: &lanDialResult{
+		stream:   stream,
+		dg:       conn,
+		closer:   quicCloser{conn},
+		opener:   quicOpener{conn},
+		acceptor: quicAcceptor{conn},
+	}})
 }
+

@@ -51,7 +51,8 @@ type LANServer struct {
 // pendingLAN tracks a client that should connect via LAN.
 type pendingLAN struct {
 	challenge []byte
-	conn      *Conn // the relay Conn to upgrade
+	conn      *Conn // the relay Conn to upgrade (nil when executor-driven)
+	onVerify  func(stream io.ReadWriteCloser, conn *quic.Conn) // executor callback
 }
 
 // NewLANServer creates a LAN QUIC listener. The addr parameter
@@ -195,8 +196,13 @@ func (s *LANServer) handleConn(conn *quic.Conn) {
 
 	slog.Info("LAN connection verified", "peer", verify.InstanceID)
 
-	// Swap the relay Conn's transport to the direct LAN connection.
-	pending.conn.setDirectPath(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
+	if pending.onVerify != nil {
+		// Executor-driven: post the verified connection back.
+		pending.onVerify(stream, conn)
+	} else {
+		// Legacy: swap the relay Conn's transport directly.
+		pending.conn.setDirectPath(stream, conn, quicCloser{conn}, quicOpener{conn}, quicAcceptor{conn})
+	}
 	slog.Info("upgraded to LAN", "peer", verify.InstanceID)
 }
 

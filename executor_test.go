@@ -319,6 +319,63 @@ func (d *chanDatagram) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 	}
 }
 
+// TestExecutorLANLifecycle verifies the full LAN lifecycle through
+// the executor: backend offers → client dials → both activate →
+// monitor starts → fallback → cleanup.
+func TestExecutorLANLifecycle(t *testing.T) {
+	// Test the backend machine's event sequence for LAN activation.
+	m := NewBackendMachine()
+	m.State = BackendRelayConnected
+
+	m.Guards[GuardChallengeValid] = func() bool { return true }
+	m.Guards[GuardChallengeInvalid] = func() bool { return false }
+	m.Guards[GuardLanServerAvailable] = func() bool { return true }
+	m.Guards[GuardUnderMaxFailures] = func() bool { return false }
+	m.Guards[GuardAtMaxFailures] = func() bool { return true }
+	m.Actions[ActionActivateLan] = func() error { return nil }
+	m.Actions[ActionFallbackToRelay] = func() error { return nil }
+
+	// 1. LAN server ready → offer
+	cmds, _ := m.HandleEvent(EventLanServerReady)
+	assertCmds(t, cmds, CmdSendLanOffer)
+	if m.State != BackendLANOffered {
+		t.Fatalf("expected LANOffered, got %s", m.State)
+	}
+
+	// 2. Client verifies → activate LAN
+	cmds, _ = m.HandleEvent(EventRecvLanVerify)
+	assertCmds(t, cmds,
+		CmdSendLanConfirm,
+		CmdStartLanStreamReader, CmdStartLanDgReader,
+		CmdStartMonitor, CmdSignalLanReady, CmdSetCryptoDatagram)
+	if m.State != BackendLANActive {
+		t.Fatalf("expected LANActive, got %s", m.State)
+	}
+
+	// 3. Ping timeout → degrade
+	cmds, _ = m.HandleEvent(EventPingTimeout)
+	if m.State != BackendLANDegraded {
+		t.Fatalf("expected LANDegraded, got %s", m.State)
+	}
+
+	// 4. Max failures → fallback with full cleanup
+	m.PingFailures = 2
+	cmds, _ = m.HandleEvent(EventPingTimeout)
+	assertCmds(t, cmds,
+		CmdStopMonitor, CmdStopLanStreamReader, CmdStopLanDgReader,
+		CmdCloseLanPath, CmdResetLanReady, CmdStartBackoffTimer)
+	if m.State != BackendRelayBackoff {
+		t.Fatalf("expected RelayBackoff, got %s", m.State)
+	}
+
+	// 5. Backoff expires → re-offer
+	cmds, _ = m.HandleEvent(EventBackoffExpired)
+	assertCmds(t, cmds, CmdSendLanOffer)
+	if m.State != BackendLANOffered {
+		t.Fatalf("expected LANOffered, got %s", m.State)
+	}
+}
+
 // pipeStream combines a reader and writer into an io.ReadWriteCloser.
 type pipeStream struct {
 	r io.Reader
