@@ -122,56 +122,56 @@ const (
 
 // Actions.
 const (
-	ActionRegisterRelay ActionID = "register_relay"
-	ActionDeriveSecret ActionID = "derive_secret"
-	ActionStoreDevice ActionID = "store_device"
-	ActionStoreSecret ActionID = "store_secret"
-	ActionDialLan ActionID = "dial_lan"
-	ActionUnbridge ActionID = "unbridge"
-	ActionVerifyDevice ActionID = "verify_device"
-	ActionActivateLan ActionID = "activate_lan"
-	ActionResetFailures ActionID = "reset_failures"
 	ActionFallbackToRelay ActionID = "fallback_to_relay"
 	ActionSendPairHello ActionID = "send_pair_hello"
+	ActionStoreSecret ActionID = "store_secret"
 	ActionBridgeStreams ActionID = "bridge_streams"
+	ActionUnbridge ActionID = "unbridge"
 	ActionGenerateToken ActionID = "generate_token"
+	ActionRegisterRelay ActionID = "register_relay"
+	ActionStoreDevice ActionID = "store_device"
+	ActionVerifyDevice ActionID = "verify_device"
+	ActionDialLan ActionID = "dial_lan"
+	ActionDeriveSecret ActionID = "derive_secret"
+	ActionActivateLan ActionID = "activate_lan"
+	ActionResetFailures ActionID = "reset_failures"
 )
 
 // Internal events.
 const (
+	EventFinalise EventID = "finalise"
+	EventBackoffExpired EventID = "backoff_expired"
+	EventLanDialOk EventID = "lan_dial_ok"
+	EventLanDialFailed EventID = "lan_dial_failed"
+	EventTokenCreated EventID = "token_created"
+	EventCliCodeEntered EventID = "cli_code_entered"
+	EventCheckCode EventID = "check_code"
+	EventVerify EventID = "verify"
+	EventSessionEstablished EventID = "session_established"
+	EventKeyPairGenerated EventID = "key_pair_generated"
+	EventEcdhComplete EventID = "ecdh_complete"
+	EventLanServerChanged EventID = "lan_server_changed"
+	EventRelayConnected EventID = "relay_connected"
+	EventRelayRegistered EventID = "relay_registered"
+	EventSignalCodeDisplay EventID = "signal_code_display"
+	EventLanServerReady EventID = "lan_server_ready"
+	EventReadvertiseTick EventID = "readvertise_tick"
+	EventBackendRegister EventID = "backend_register"
 	EventDisconnect EventID = "disconnect"
 	EventBackchannelReceived EventID = "backchannel_received"
-	EventBackendRegister EventID = "backend_register"
-	EventClientDisconnect EventID = "client_disconnect"
-	EventFinalise EventID = "finalise"
 	EventOfferTimeout EventID = "offer_timeout"
-	EventCodeDisplayed EventID = "code_displayed"
-	EventCliInitPair EventID = "cli_init_pair"
-	EventCheckCode EventID = "check_code"
-	EventLanServerReady EventID = "lan_server_ready"
 	EventPingTick EventID = "ping_tick"
-	EventPingTimeout EventID = "ping_timeout"
-	EventLanDialOk EventID = "lan_dial_ok"
-	EventVerifyTimeout EventID = "verify_timeout"
-	EventCliCodeEntered EventID = "cli_code_entered"
-	EventLanServerChanged EventID = "lan_server_changed"
-	EventKeyPairGenerated EventID = "key_pair_generated"
-	EventClientConnect EventID = "client_connect"
-	EventRelayRegistered EventID = "relay_registered"
-	EventEcdhComplete EventID = "ecdh_complete"
-	EventReadvertiseTick EventID = "readvertise_tick"
-	EventSessionEstablished EventID = "session_established"
-	EventSecretParsed EventID = "secret_parsed"
-	EventRelayConnected EventID = "relay_connected"
-	EventRelayOk EventID = "relay_ok"
-	EventVerify EventID = "verify"
-	EventBackoffExpired EventID = "backoff_expired"
-	EventAppLaunch EventID = "app_launch"
-	EventLanDialFailed EventID = "lan_dial_failed"
 	EventLanError EventID = "lan_error"
+	EventRelayOk EventID = "relay_ok"
+	EventClientDisconnect EventID = "client_disconnect"
 	EventBackendDisconnect EventID = "backend_disconnect"
-	EventTokenCreated EventID = "token_created"
-	EventSignalCodeDisplay EventID = "signal_code_display"
+	EventCliInitPair EventID = "cli_init_pair"
+	EventPingTimeout EventID = "ping_timeout"
+	EventSecretParsed EventID = "secret_parsed"
+	EventAppLaunch EventID = "app_launch"
+	EventClientConnect EventID = "client_connect"
+	EventCodeDisplayed EventID = "code_displayed"
+	EventVerifyTimeout EventID = "verify_timeout"
 )
 
 func SessionProtocol() *Protocol {
@@ -219,7 +219,7 @@ func SessionProtocol() *Protocol {
 				{From: "ShowCode", To: "WaitPairComplete", On: Internal("code_displayed")},
 				{From: "WaitPairComplete", To: "Paired", On: Recv("pair_complete"), Do: "store_secret"},
 				{From: "Paired", To: "Reconnect", On: Internal("app_launch")},
-				{From: "Reconnect", To: "SendAuth", On: Internal("relay_connected"), Sends: []Send{{To: "backend", Msg: "auth_request", Fields: map[string]string{"key": "client_shared_key", "device_id": "\"device_1\"", "secret": "device_secret", "nonce": "\"nonce_1\"", }}, }},
+				{From: "Reconnect", To: "SendAuth", On: Internal("relay_connected"), Sends: []Send{{To: "backend", Msg: "auth_request", Fields: map[string]string{"device_id": "\"device_1\"", "secret": "device_secret", "nonce": "\"nonce_1\"", "key": "client_shared_key", }}, }},
 				{From: "SendAuth", To: "SessionActive", On: Recv("auth_ok")},
 				{From: "SessionActive", To: "RelayConnected", On: Internal("session_established")},
 				{From: "RelayConnected", To: "LANConnecting", On: Recv("lan_offer"), Guard: "lan_enabled", Do: "dial_lan"},
