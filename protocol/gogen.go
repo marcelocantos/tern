@@ -63,6 +63,7 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 		b.WriteString("\tGuardID    = protocol.GuardID\n")
 		b.WriteString("\tActionID   = protocol.ActionID\n")
 		b.WriteString("\tEventID    = protocol.EventID\n")
+		b.WriteString("\tCmdID      = protocol.CmdID\n")
 		b.WriteString("\tProtocol   = protocol.Protocol\n")
 		b.WriteString("\tActor      = protocol.Actor\n")
 		b.WriteString("\tTransition = protocol.Transition\n")
@@ -134,10 +135,32 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 		b.WriteString(")\n\n")
 	}
 
+	// Collect message-receipt events (recv X → EventRecvX).
+	for _, a := range p.Actors {
+		for _, t := range a.Transitions {
+			if t.On.Kind == TriggerRecv {
+				events["recv_"+string(t.On.Msg)] = true
+			}
+		}
+	}
+	// Add declared events from the events: section.
+	for _, e := range p.Events {
+		events[string(e.ID)] = true
+	}
+
 	if len(events) > 0 {
-		b.WriteString("// Internal events.\nconst (\n")
+		b.WriteString("// Events.\nconst (\n")
 		for id := range events {
 			fmt.Fprintf(&b, "\tEvent%s EventID = %q\n", goCamel(id), id)
+		}
+		b.WriteString(")\n\n")
+	}
+
+	// Command IDs from the commands: section.
+	if len(p.Commands) > 0 {
+		b.WriteString("// Commands.\nconst (\n")
+		for _, c := range p.Commands {
+			fmt.Fprintf(&b, "\tCmd%s CmdID = %q\n", goCamel(string(c.ID)), c.ID)
 		}
 		b.WriteString(")\n\n")
 	}
@@ -356,6 +379,32 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 			b.WriteString("\t\treturn true, nil\n")
 		}
 		b.WriteString("\t}\n\treturn false, nil\n}\n\n")
+
+		// HandleEvent — unified entry point returning commands.
+		// Maps recv messages to EventRecv* and internal events to Event*.
+		fmt.Fprintf(&b, "func (m *%sMachine) HandleEvent(ev EventID) ([]CmdID, error) {\n", prefix)
+		b.WriteString("\tswitch {\n")
+		for _, t := range a.Transitions {
+			guard := ""
+			if t.Guard != "" {
+				guard = fmt.Sprintf(" && m.Guards[Guard%s] != nil && m.Guards[Guard%s]()",
+					goCamel(string(t.Guard)), goCamel(string(t.Guard)))
+			}
+
+			// Event ID: recv messages become EventRecv*, internal events become Event*.
+			var eventConst string
+			if t.On.Kind == TriggerRecv {
+				eventConst = fmt.Sprintf("EventRecv%s", goCamel(string(t.On.Msg)))
+			} else {
+				eventConst = fmt.Sprintf("Event%s", goCamel(t.On.Desc))
+			}
+
+			fmt.Fprintf(&b, "\tcase m.State == %s%s && ev == %s%s:\n",
+				stateType, goCamel(string(t.From)), eventConst, guard)
+
+			writeGoEventTransitionBody(&b, t, stateType)
+		}
+		b.WriteString("\t}\n\treturn nil, nil\n}\n\n")
 	}
 
 	_, err := io.WriteString(w, b.String())
@@ -386,6 +435,45 @@ func writeGoTransitionBody(b *strings.Builder, t Transition, stateType string) {
 
 	// State transition.
 	fmt.Fprintf(b, "\t\tm.State = %s%s\n", stateType, goCamel(string(t.To)))
+}
+
+// writeGoEventTransitionBody emits the action call, variable updates,
+// state change, and command list return for HandleEvent.
+func writeGoEventTransitionBody(b *strings.Builder, t Transition, stateType string) {
+	// Action.
+	if t.Do != "" {
+		fmt.Fprintf(b, "\t\tif fn := m.Actions[Action%s]; fn != nil {\n", goCamel(string(t.Do)))
+		b.WriteString("\t\t\tif err := fn(); err != nil { return nil, err }\n")
+		b.WriteString("\t\t}\n")
+	}
+
+	// Variable updates.
+	for _, u := range t.Updates {
+		field := goCamel(u.Var)
+		if lit, ok := goSimpleLiteral(u.Expr); ok {
+			fmt.Fprintf(b, "\t\tm.%s = %s\n", field, lit)
+			fmt.Fprintf(b, "\t\tif m.OnChange != nil { m.OnChange(%q) }\n", u.Var)
+		} else {
+			fmt.Fprintf(b, "\t\t// %s: %s (set by action)\n", u.Var, u.Expr)
+		}
+	}
+
+	// State transition.
+	fmt.Fprintf(b, "\t\tm.State = %s%s\n", stateType, goCamel(string(t.To)))
+
+	// Return emitted commands.
+	if len(t.Emits) > 0 {
+		b.WriteString("\t\treturn []CmdID{")
+		for i, cmd := range t.Emits {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(b, "Cmd%s", goCamel(string(cmd)))
+		}
+		b.WriteString("}, nil\n")
+	} else {
+		b.WriteString("\t\treturn nil, nil\n")
+	}
 }
 
 // goSimpleLiteral converts a TLA+ expression to a Go literal if it's
