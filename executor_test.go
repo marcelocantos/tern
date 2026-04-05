@@ -247,6 +247,78 @@ func TestExecutorSendRecv(t *testing.T) {
 	}
 }
 
+// TestExecutorSendRecvDatagram verifies that sendDatagram() and
+// recvDatagram() work through the executor event loop.
+func TestExecutorSendRecvDatagram(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Mock datagram transport: sent datagrams are received by the peer.
+	// localToRemote carries datagrams from local → remote.
+	// remoteToLocal carries datagrams from remote → local.
+	localToRemote := make(chan []byte, 64)
+	remoteToLocal := make(chan []byte, 64)
+	localDg := &chanDatagram{out: localToRemote, in: remoteToLocal}
+	remoteDg := &chanDatagram{out: remoteToLocal, in: localToRemote}
+
+	m := NewBackendMachine()
+	m.State = BackendRelayConnected
+
+	relay := newPath("relay", &execMockStream{}, localDg, nil, nil, nil)
+	e := newExecutor(ctx, cancel, m, relay)
+
+	// Send a datagram through the executor.
+	if err := e.sendDatagram([]byte("dgtest")); err != nil {
+		t.Fatal("sendDatagram:", err)
+	}
+
+	// Read the raw datagram from the "remote" side and verify framing.
+	raw := <-remoteDg.in
+	if len(raw) < 2 || raw[0] != dgConnWhole {
+		t.Fatalf("bad frame: %x", raw)
+	}
+	if string(raw[1:]) != "dgtest" {
+		t.Fatalf("payload: got %q, want dgtest", raw[1:])
+	}
+
+	// Now test recv: send a framed datagram from the remote side.
+	frame := make([]byte, 1+len("dgback"))
+	frame[0] = dgConnWhole
+	copy(frame[1:], "dgback")
+	localDg.in <- frame
+
+	// Give the datagram reader time to post the event.
+	time.Sleep(50 * time.Millisecond)
+
+	got, err := e.recvDatagram(ctx)
+	if err != nil {
+		t.Fatal("recvDatagram:", err)
+	}
+	if string(got) != "dgback" {
+		t.Fatalf("got %q, want dgback", got)
+	}
+}
+
+// chanDatagram implements datagrammer using Go channels.
+type chanDatagram struct {
+	out chan []byte // datagrams we send go here
+	in  chan []byte // datagrams we receive come from here
+}
+
+func (d *chanDatagram) SendDatagram(data []byte) error {
+	d.out <- data
+	return nil
+}
+
+func (d *chanDatagram) ReceiveDatagram(ctx context.Context) ([]byte, error) {
+	select {
+	case data := <-d.in:
+		return data, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // pipeStream combines a reader and writer into an io.ReadWriteCloser.
 type pipeStream struct {
 	r io.Reader

@@ -265,6 +265,7 @@ actors:
 
       # App I/O — self-loop transitions that route to the active path.
       # These exist on every transport state where the app can send/recv.
+      # Streams:
       - from: RelayConnected
         to: RelayConnected
         on: app_send
@@ -313,6 +314,55 @@ actors:
         to: RelayBackoff
         on: relay_stream_data
         emits: [deliver_recv]
+      # Datagrams:
+      - from: RelayConnected
+        to: RelayConnected
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: RelayConnected
+        to: RelayConnected
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANOffered
+        to: LANOffered
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: LANOffered
+        to: LANOffered
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANActive
+        to: LANActive
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: LANActive
+        to: LANActive
+        on: lan_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANActive
+        to: LANActive
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANDegraded
+        to: LANDegraded
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: LANDegraded
+        to: LANDegraded
+        on: lan_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANDegraded
+        to: LANDegraded
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
+      - from: RelayBackoff
+        to: RelayBackoff
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: RelayBackoff
+        to: RelayBackoff
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
 
       - from: RelayConnected
         to: LANOffered
@@ -585,6 +635,51 @@ actors:
         to: RelayFallback
         on: relay_stream_data
         emits: [deliver_recv]
+      # Datagrams:
+      - from: RelayConnected
+        to: RelayConnected
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: RelayConnected
+        to: RelayConnected
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANConnecting
+        to: LANConnecting
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: LANConnecting
+        to: LANConnecting
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANVerifying
+        to: LANVerifying
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: LANVerifying
+        to: LANVerifying
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANActive
+        to: LANActive
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: LANActive
+        to: LANActive
+        on: lan_datagram
+        emits: [deliver_recv_datagram]
+      - from: LANActive
+        to: LANActive
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
+      - from: RelayFallback
+        to: RelayFallback
+        on: app_send_datagram
+        emits: [send_active_datagram]
+      - from: RelayFallback
+        to: RelayFallback
+        on: relay_datagram
+        emits: [deliver_recv_datagram]
 
       - from: RelayConnected
         to: LANConnecting

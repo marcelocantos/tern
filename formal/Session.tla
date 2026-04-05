@@ -354,6 +354,78 @@ backend_RelayBackoff_to_RelayBackoff_relay_stream_data ==
     /\ backend_state' = backend_RelayBackoff
     /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
 
+\* backend: RelayConnected -> RelayConnected (app_send_datagram)
+backend_RelayConnected_to_RelayConnected_app_send_datagram ==
+    /\ backend_state = backend_RelayConnected
+    /\ backend_state' = backend_RelayConnected
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: RelayConnected -> RelayConnected (relay_datagram)
+backend_RelayConnected_to_RelayConnected_relay_datagram ==
+    /\ backend_state = backend_RelayConnected
+    /\ backend_state' = backend_RelayConnected
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: LANOffered -> LANOffered (app_send_datagram)
+backend_LANOffered_to_LANOffered_app_send_datagram ==
+    /\ backend_state = backend_LANOffered
+    /\ backend_state' = backend_LANOffered
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: LANOffered -> LANOffered (relay_datagram)
+backend_LANOffered_to_LANOffered_relay_datagram ==
+    /\ backend_state = backend_LANOffered
+    /\ backend_state' = backend_LANOffered
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: LANActive -> LANActive (app_send_datagram)
+backend_LANActive_to_LANActive_app_send_datagram ==
+    /\ backend_state = backend_LANActive
+    /\ backend_state' = backend_LANActive
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: LANActive -> LANActive (lan_datagram)
+backend_LANActive_to_LANActive_lan_datagram ==
+    /\ backend_state = backend_LANActive
+    /\ backend_state' = backend_LANActive
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: LANActive -> LANActive (relay_datagram)
+backend_LANActive_to_LANActive_relay_datagram ==
+    /\ backend_state = backend_LANActive
+    /\ backend_state' = backend_LANActive
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: LANDegraded -> LANDegraded (app_send_datagram)
+backend_LANDegraded_to_LANDegraded_app_send_datagram ==
+    /\ backend_state = backend_LANDegraded
+    /\ backend_state' = backend_LANDegraded
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: LANDegraded -> LANDegraded (lan_datagram)
+backend_LANDegraded_to_LANDegraded_lan_datagram ==
+    /\ backend_state = backend_LANDegraded
+    /\ backend_state' = backend_LANDegraded
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: LANDegraded -> LANDegraded (relay_datagram)
+backend_LANDegraded_to_LANDegraded_relay_datagram ==
+    /\ backend_state = backend_LANDegraded
+    /\ backend_state' = backend_LANDegraded
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: RelayBackoff -> RelayBackoff (app_send_datagram)
+backend_RelayBackoff_to_RelayBackoff_app_send_datagram ==
+    /\ backend_state = backend_RelayBackoff
+    /\ backend_state' = backend_RelayBackoff
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* backend: RelayBackoff -> RelayBackoff (relay_datagram)
+backend_RelayBackoff_to_RelayBackoff_relay_datagram ==
+    /\ backend_state = backend_RelayBackoff
+    /\ backend_state' = backend_RelayBackoff
+    /\ UNCHANGED <<client_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
 \* backend: RelayConnected -> LANOffered (lan_server_ready)
 backend_RelayConnected_to_LANOffered_lan_server_ready ==
     /\ backend_state = backend_RelayConnected
@@ -626,6 +698,72 @@ client_RelayFallback_to_RelayFallback_relay_stream_data ==
     /\ client_state' = client_RelayFallback
     /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
 
+\* client: RelayConnected -> RelayConnected (app_send_datagram)
+client_RelayConnected_to_RelayConnected_app_send_datagram ==
+    /\ client_state = client_RelayConnected
+    /\ client_state' = client_RelayConnected
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: RelayConnected -> RelayConnected (relay_datagram)
+client_RelayConnected_to_RelayConnected_relay_datagram ==
+    /\ client_state = client_RelayConnected
+    /\ client_state' = client_RelayConnected
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: LANConnecting -> LANConnecting (app_send_datagram)
+client_LANConnecting_to_LANConnecting_app_send_datagram ==
+    /\ client_state = client_LANConnecting
+    /\ client_state' = client_LANConnecting
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: LANConnecting -> LANConnecting (relay_datagram)
+client_LANConnecting_to_LANConnecting_relay_datagram ==
+    /\ client_state = client_LANConnecting
+    /\ client_state' = client_LANConnecting
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: LANVerifying -> LANVerifying (app_send_datagram)
+client_LANVerifying_to_LANVerifying_app_send_datagram ==
+    /\ client_state = client_LANVerifying
+    /\ client_state' = client_LANVerifying
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: LANVerifying -> LANVerifying (relay_datagram)
+client_LANVerifying_to_LANVerifying_relay_datagram ==
+    /\ client_state = client_LANVerifying
+    /\ client_state' = client_LANVerifying
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: LANActive -> LANActive (app_send_datagram)
+client_LANActive_to_LANActive_app_send_datagram ==
+    /\ client_state = client_LANActive
+    /\ client_state' = client_LANActive
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: LANActive -> LANActive (lan_datagram)
+client_LANActive_to_LANActive_lan_datagram ==
+    /\ client_state = client_LANActive
+    /\ client_state' = client_LANActive
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: LANActive -> LANActive (relay_datagram)
+client_LANActive_to_LANActive_relay_datagram ==
+    /\ client_state = client_LANActive
+    /\ client_state' = client_LANActive
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: RelayFallback -> RelayFallback (app_send_datagram)
+client_RelayFallback_to_RelayFallback_app_send_datagram ==
+    /\ client_state = client_RelayFallback
+    /\ client_state' = client_RelayFallback
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: RelayFallback -> RelayFallback (relay_datagram)
+client_RelayFallback_to_RelayFallback_relay_datagram ==
+    /\ client_state = client_RelayFallback
+    /\ client_state' = client_RelayFallback
+    /\ UNCHANGED <<backend_state, relay_state, current_token, active_tokens, used_tokens, backend_ecdh_pub, received_client_pub, received_backend_pub, backend_shared_key, client_shared_key, backend_code, client_code, received_code, code_attempts, device_secret, paired_devices, received_device_id, auth_nonces_used, received_auth_nonce, secret_published, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, relay_bridge, received_pair_hello, received_auth_request, received_lan_verify, received_path_pong, received_pair_hello_ack, received_pair_confirm, received_pair_complete, received_auth_ok, received_lan_offer, received_lan_confirm, received_path_ping>>
+
 \* client: RelayConnected -> LANConnecting on recv lan_offer [lan_enabled]
 client_RelayConnected_to_LANConnecting_on_lan_offer_lan_enabled ==
     /\ client_state = client_RelayConnected
@@ -770,6 +908,18 @@ Next ==
     \/ backend_LANDegraded_to_LANDegraded_relay_stream_data
     \/ backend_RelayBackoff_to_RelayBackoff_app_send
     \/ backend_RelayBackoff_to_RelayBackoff_relay_stream_data
+    \/ backend_RelayConnected_to_RelayConnected_app_send_datagram
+    \/ backend_RelayConnected_to_RelayConnected_relay_datagram
+    \/ backend_LANOffered_to_LANOffered_app_send_datagram
+    \/ backend_LANOffered_to_LANOffered_relay_datagram
+    \/ backend_LANActive_to_LANActive_app_send_datagram
+    \/ backend_LANActive_to_LANActive_lan_datagram
+    \/ backend_LANActive_to_LANActive_relay_datagram
+    \/ backend_LANDegraded_to_LANDegraded_app_send_datagram
+    \/ backend_LANDegraded_to_LANDegraded_lan_datagram
+    \/ backend_LANDegraded_to_LANDegraded_relay_datagram
+    \/ backend_RelayBackoff_to_RelayBackoff_app_send_datagram
+    \/ backend_RelayBackoff_to_RelayBackoff_relay_datagram
     \/ backend_RelayConnected_to_LANOffered_lan_server_ready
     \/ backend_LANOffered_to_LANActive_on_lan_verify_challenge_valid
     \/ backend_LANOffered_to_RelayConnected_on_lan_verify_challenge_invalid
@@ -807,6 +957,17 @@ Next ==
     \/ client_LANActive_to_LANActive_relay_stream_data
     \/ client_RelayFallback_to_RelayFallback_app_send
     \/ client_RelayFallback_to_RelayFallback_relay_stream_data
+    \/ client_RelayConnected_to_RelayConnected_app_send_datagram
+    \/ client_RelayConnected_to_RelayConnected_relay_datagram
+    \/ client_LANConnecting_to_LANConnecting_app_send_datagram
+    \/ client_LANConnecting_to_LANConnecting_relay_datagram
+    \/ client_LANVerifying_to_LANVerifying_app_send_datagram
+    \/ client_LANVerifying_to_LANVerifying_relay_datagram
+    \/ client_LANActive_to_LANActive_app_send_datagram
+    \/ client_LANActive_to_LANActive_lan_datagram
+    \/ client_LANActive_to_LANActive_relay_datagram
+    \/ client_RelayFallback_to_RelayFallback_app_send_datagram
+    \/ client_RelayFallback_to_RelayFallback_relay_datagram
     \/ client_RelayConnected_to_LANConnecting_on_lan_offer_lan_enabled
     \/ client_RelayConnected_to_RelayConnected_on_lan_offer_lan_disabled
     \/ client_LANConnecting_to_LANVerifying_lan_dial_ok

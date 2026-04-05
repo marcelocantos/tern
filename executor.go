@@ -5,6 +5,7 @@ package tern
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"log/slog"
 	"math"
@@ -161,6 +162,33 @@ func (e *executor) send(ctx context.Context, data []byte) error {
 	}
 }
 
+// sendDatagram submits an app_send_datagram event. The executor
+// handles encryption and fragmentation.
+func (e *executor) sendDatagram(data []byte) error {
+	done := make(chan error, 1)
+	e.submit(event{id: EventAppSendDatagram, payload: &sendRequest{data: data, done: done}})
+	select {
+	case err := <-done:
+		return err
+	case <-e.ctx.Done():
+		return e.ctx.Err()
+	}
+}
+
+// recvDatagram submits a datagram recv waiter and blocks until data arrives.
+func (e *executor) recvDatagram(ctx context.Context) ([]byte, error) {
+	result := make(chan dgRecvResult, 1)
+	e.submit(event{id: EventAppRecvDatagram, payload: result})
+	select {
+	case r := <-result:
+		return r.data, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-e.ctx.Done():
+		return nil, e.ctx.Err()
+	}
+}
+
 // recv submits an app_recv waiter and blocks until data arrives.
 func (e *executor) recv(ctx context.Context) ([]byte, error) {
 	result := make(chan recvResult, 1)
@@ -199,6 +227,17 @@ func (e *executor) run() {
 						e.recvBuffer = e.recvBuffer[1:]
 					} else {
 						e.recvWaiters = append(e.recvWaiters, ch)
+					}
+				}
+				continue
+			}
+			if ev.id == EventAppRecvDatagram {
+				if ch, ok := ev.payload.(chan dgRecvResult); ok {
+					if len(e.dgRecvBuffer) > 0 {
+						ch <- dgRecvResult{data: e.dgRecvBuffer[0]}
+						e.dgRecvBuffer = e.dgRecvBuffer[1:]
+					} else {
+						e.dgRecvWaiters = append(e.dgRecvWaiters, ch)
 					}
 				}
 				continue
@@ -279,6 +318,25 @@ func (e *executor) executeCommand(cmd CmdID, payload any) {
 			req.done <- err
 		}
 
+	case CmdSendActiveDatagram:
+		if req, ok := payload.(*sendRequest); ok {
+			p := e.activePath()
+			data := req.data
+			if e.dgChannel != nil {
+				data = e.dgChannel.Encrypt(data)
+			}
+			// Single datagram or fragment.
+			if 1+len(data) <= e.maxDgPayload {
+				frame := make([]byte, 1+len(data))
+				frame[0] = dgConnWhole
+				copy(frame[1:], data)
+				req.done <- p.dg.SendDatagram(frame)
+			} else {
+				msgID := nextMsgID.Add(1)
+				req.done <- sendFragmented(p.dg, data, e.maxDgPayload, msgID, dgConnFragment, nil)
+			}
+		}
+
 	case CmdDeliverRecv:
 		if sd, ok := payload.(*streamData); ok {
 			e.deliverRecv(sd.data)
@@ -286,7 +344,7 @@ func (e *executor) executeCommand(cmd CmdID, payload any) {
 
 	case CmdDeliverRecvDatagram:
 		if dd, ok := payload.(*datagramData); ok {
-			e.deliverDatagram(dd.data)
+			e.processDatagram(dd.data)
 		}
 
 	case CmdSendPathPing:
@@ -418,12 +476,69 @@ func (e *executor) deliverRecvError(err error) {
 	}
 }
 
-// deliverDatagram sends data to the first waiting RecvDatagram caller.
+// processDatagram decodes framing, reassembles fragments, decrypts,
+// and delivers the payload to the application.
+func (e *executor) processDatagram(raw []byte) {
+	if len(raw) == 0 {
+		return
+	}
+
+	switch raw[0] {
+	case dgConnWhole:
+		payload := raw[1:]
+		if e.dgChannel != nil {
+			decrypted, err := e.dgChannel.Decrypt(payload)
+			if err != nil {
+				slog.Debug("datagram decrypt failed", "err", err)
+				return
+			}
+			payload = decrypted
+		}
+		e.deliverDatagram(payload)
+
+	case dgConnFragment:
+		if len(raw) < 1+fragHeaderSize {
+			return
+		}
+		msgID := binary.BigEndian.Uint32(raw[1:5])
+		fragIdx := int(binary.BigEndian.Uint16(raw[5:7]))
+		totalFrags := int(binary.BigEndian.Uint16(raw[7:9]))
+		chunk := raw[1+fragHeaderSize:]
+		if totalFrags < 2 || fragIdx >= totalFrags {
+			return
+		}
+		assembled := e.reasm.feed(msgID, fragIdx, totalFrags, chunk)
+		if assembled == nil {
+			return
+		}
+		if e.dgChannel != nil {
+			decrypted, err := e.dgChannel.Decrypt(assembled)
+			if err != nil {
+				slog.Debug("fragment decrypt failed", "err", err)
+				return
+			}
+			assembled = decrypted
+		}
+		e.deliverDatagram(assembled)
+
+	case dgChanWhole, dgChanFragment:
+		// Channel-tagged datagrams — TODO: route to per-channel queues.
+		slog.Debug("channel datagram received (not yet routed)")
+
+	default:
+		// Unknown frame type — discard.
+	}
+}
+
+// deliverDatagram sends data to the first waiting RecvDatagram caller,
+// or buffers it if no waiter is registered.
 func (e *executor) deliverDatagram(data []byte) {
 	if len(e.dgRecvWaiters) > 0 {
 		w := e.dgRecvWaiters[0]
 		e.dgRecvWaiters = e.dgRecvWaiters[1:]
 		w <- dgRecvResult{data: data}
+	} else {
+		e.dgRecvBuffer = append(e.dgRecvBuffer, data)
 	}
 }
 
