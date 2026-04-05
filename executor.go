@@ -45,6 +45,12 @@ type dgRecvResult struct {
 	err  error
 }
 
+// chanDgRecvRequest is the payload for channel datagram recv waiters.
+type chanDgRecvRequest struct {
+	chanID uint16
+	result chan dgRecvResult
+}
+
 // streamData is the payload for relay/LAN stream data events.
 type streamData struct {
 	data []byte
@@ -105,11 +111,9 @@ type executor struct {
 	dgRecvWaiters []chan dgRecvResult
 	dgRecvBuffer  [][]byte
 
-	// Legacy datagram channel routing (until DatagramChannel migrates
-	// to the executor). The callback routes channel-tagged datagrams.
-	routeChannelDatagram func(id uint16, payload []byte)
-	// Drain legacy channel queues on path switch.
-	drainChannelQueues func()
+	// Per-channel datagram routing.
+	chanDgWaiters map[uint16][]chan dgRecvResult
+	chanDgBuffers map[uint16][][]byte
 
 	// Encryption (executor-level, not machine-level).
 	channel   *crypto.Channel
@@ -164,16 +168,18 @@ func newExecutor(
 	}()
 
 	e := &executor{
-		machine:      machine,
-		events:       make(chan event, 64),
-		relay:        relay,
-		lanReady:     make(chan struct{}),
-		reasm:        newReassembler(DefaultFragmentTimeout, done),
-		maxDgPayload: DefaultMaxDatagramPayload,
-		pingInterval: 5 * time.Second,
-		pongTimeout:  4 * time.Second,
-		ctx:          ctx,
-		cancel:       cancel,
+		machine:       machine,
+		events:        make(chan event, 64),
+		relay:         relay,
+		lanReady:      make(chan struct{}),
+		chanDgWaiters: make(map[uint16][]chan dgRecvResult),
+		chanDgBuffers: make(map[uint16][][]byte),
+		reasm:         newReassembler(DefaultFragmentTimeout, done),
+		maxDgPayload:  DefaultMaxDatagramPayload,
+		pingInterval:  5 * time.Second,
+		pongTimeout:   4 * time.Second,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	// Start relay readers — they run for the lifetime of the connection.
@@ -290,12 +296,23 @@ func (e *executor) run() {
 				continue
 			}
 			if ev.id == EventAppRecvDatagram {
-				if ch, ok := ev.payload.(chan dgRecvResult); ok {
+				switch p := ev.payload.(type) {
+				case chan dgRecvResult:
+					// Conn-level datagram recv.
 					if len(e.dgRecvBuffer) > 0 {
-						ch <- dgRecvResult{data: e.dgRecvBuffer[0]}
+						p <- dgRecvResult{data: e.dgRecvBuffer[0]}
 						e.dgRecvBuffer = e.dgRecvBuffer[1:]
 					} else {
-						e.dgRecvWaiters = append(e.dgRecvWaiters, ch)
+						e.dgRecvWaiters = append(e.dgRecvWaiters, p)
+					}
+				case *chanDgRecvRequest:
+					// Per-channel datagram recv.
+					id := p.chanID
+					if buf := e.chanDgBuffers[id]; len(buf) > 0 {
+						p.result <- dgRecvResult{data: buf[0]}
+						e.chanDgBuffers[id] = buf[1:]
+					} else {
+						e.chanDgWaiters[id] = append(e.chanDgWaiters[id], p.result)
 					}
 				}
 				if ev.done != nil {
@@ -530,8 +547,8 @@ func (e *executor) executeCommand(cmd CmdID, payload any) {
 		}
 		// Drain stale datagram buffers from the old path.
 		e.dgRecvBuffer = nil
-		if e.drainChannelQueues != nil {
-			e.drainChannelQueues()
+		for id := range e.chanDgBuffers {
+			e.chanDgBuffers[id] = nil
 		}
 
 	case CmdSignalLanReady:
@@ -643,9 +660,7 @@ func (e *executor) processDatagram(raw []byte) {
 		}
 		id := binary.BigEndian.Uint16(raw[1:3])
 		payload := raw[1+chanIDSize:]
-		if e.routeChannelDatagram != nil {
-			e.routeChannelDatagram(id, payload)
-		}
+		e.deliverChannelDatagram(id, payload)
 
 	case dgChanFragment:
 		if len(raw) < 1+chanIDSize+fragHeaderSize {
@@ -664,9 +679,7 @@ func (e *executor) processDatagram(raw []byte) {
 		if assembled == nil {
 			return
 		}
-		if e.routeChannelDatagram != nil {
-			e.routeChannelDatagram(id, assembled)
-		}
+		e.deliverChannelDatagram(id, assembled)
 
 	default:
 		// Unknown frame type — discard.
@@ -682,6 +695,33 @@ func (e *executor) deliverDatagram(data []byte) {
 		w <- dgRecvResult{data: data}
 	} else {
 		e.dgRecvBuffer = append(e.dgRecvBuffer, data)
+	}
+}
+
+// deliverChannelDatagram sends data to a waiting channel datagram
+// receiver, or buffers it if no waiter is registered.
+func (e *executor) deliverChannelDatagram(id uint16, data []byte) {
+	if ws := e.chanDgWaiters[id]; len(ws) > 0 {
+		w := ws[0]
+		e.chanDgWaiters[id] = ws[1:]
+		w <- dgRecvResult{data: data}
+	} else {
+		e.chanDgBuffers[id] = append(e.chanDgBuffers[id], data)
+	}
+}
+
+// recvChannelDatagram registers a waiter for the next datagram on the
+// given channel ID. Delivers immediately from the buffer if available.
+func (e *executor) recvChannelDatagram(ctx context.Context, id uint16) ([]byte, error) {
+	result := make(chan dgRecvResult, 1)
+	e.submit(event{id: EventAppRecvDatagram, payload: &chanDgRecvRequest{chanID: id, result: result}})
+	select {
+	case r := <-result:
+		return r.data, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-e.ctx.Done():
+		return nil, e.ctx.Err()
 	}
 }
 

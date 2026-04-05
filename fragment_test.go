@@ -44,8 +44,8 @@ func TestDatagramLargePayload(t *testing.T) {
 	b, c := connectPair(t, env)
 
 	// Force small max payload to trigger fragmentation.
-	c.maxDgPayload = 50
-	b.maxDgPayload = 50
+	c.exec.maxDgPayload = 50
+	b.exec.maxDgPayload = 50
 
 	// 500 bytes → multiple fragments.
 	payload := make([]byte, 500)
@@ -95,8 +95,8 @@ func TestDatagramMultipleLargeMessages(t *testing.T) {
 	defer cancel()
 
 	b, c := connectPair(t, env)
-	c.maxDgPayload = 100
-	b.maxDgPayload = 100
+	c.exec.maxDgPayload = 100
+	b.exec.maxDgPayload = 100
 
 	msgs := make([][]byte, 5)
 	for i := range msgs {
@@ -175,8 +175,8 @@ func TestDatagramBidirectionalLarge(t *testing.T) {
 	defer cancel()
 
 	b, c := connectPair(t, env)
-	c.maxDgPayload = 80
-	b.maxDgPayload = 80
+	c.exec.maxDgPayload = 80
+	b.exec.maxDgPayload = 80
 
 	payload1 := bytes.Repeat([]byte("A"), 300)
 	c.SendDatagram(payload1)
@@ -209,8 +209,8 @@ func TestDatagramLargeUnderLoss(t *testing.T) {
 	defer cancel()
 
 	b, c := connectPair(t, env)
-	c.maxDgPayload = 80
-	b.maxDgPayload = 80
+	c.exec.maxDgPayload = 80
+	b.exec.maxDgPayload = 80
 
 	for i := range 10 {
 		payload := make([]byte, 200)
@@ -242,7 +242,7 @@ func TestDatagramTooLarge(t *testing.T) {
 	_, c := connectPair(t, env)
 	// maxPayload = 10 means 1 byte per chunk (10 - 1 prefix - 8 header = 1).
 	// 65536 bytes → 65536 fragments > 65535 max.
-	c.maxDgPayload = 10
+	c.exec.maxDgPayload = 10
 
 	payload := make([]byte, 65536)
 	err := c.SendDatagram(payload)
@@ -260,8 +260,8 @@ func TestDatagramMixedSmallAndLarge(t *testing.T) {
 	defer cancel()
 
 	b, c := connectPair(t, env)
-	c.maxDgPayload = 80
-	b.maxDgPayload = 80
+	c.exec.maxDgPayload = 80
+	b.exec.maxDgPayload = 80
 
 	// Send: small, large, small, large.
 	c.SendDatagram([]byte("small-1"))
