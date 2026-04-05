@@ -104,6 +104,12 @@ type executor struct {
 	dgRecvWaiters []chan dgRecvResult
 	dgRecvBuffer  [][]byte
 
+	// Legacy datagram channel routing (until DatagramChannel migrates
+	// to the executor). The callback routes channel-tagged datagrams.
+	routeChannelDatagram func(id uint16, payload []byte)
+	// Drain legacy channel queues on path switch.
+	drainChannelQueues func()
+
 	// Encryption (executor-level, not machine-level).
 	channel   *crypto.Channel
 	dgChannel *crypto.Channel
@@ -470,6 +476,11 @@ func (e *executor) executeCommand(cmd CmdID, payload any) {
 			e.lan.close()
 			e.lan = nil
 		}
+		// Drain stale datagram buffers from the old path.
+		e.dgRecvBuffer = nil
+		if e.drainChannelQueues != nil {
+			e.drainChannelQueues()
+		}
 
 	case CmdSignalLanReady:
 		select {
@@ -568,9 +579,36 @@ func (e *executor) processDatagram(raw []byte) {
 		}
 		e.deliverDatagram(assembled)
 
-	case dgChanWhole, dgChanFragment:
-		// Channel-tagged datagrams — TODO: route to per-channel queues.
-		slog.Debug("channel datagram received (not yet routed)")
+	case dgChanWhole:
+		if len(raw) < 1+chanIDSize {
+			return
+		}
+		id := binary.BigEndian.Uint16(raw[1:3])
+		payload := raw[1+chanIDSize:]
+		if e.routeChannelDatagram != nil {
+			e.routeChannelDatagram(id, payload)
+		}
+
+	case dgChanFragment:
+		if len(raw) < 1+chanIDSize+fragHeaderSize {
+			return
+		}
+		id := binary.BigEndian.Uint16(raw[1:3])
+		off := 1 + chanIDSize
+		msgID := binary.BigEndian.Uint32(raw[off : off+4])
+		fragIdx := int(binary.BigEndian.Uint16(raw[off+4 : off+6]))
+		totalFrags := int(binary.BigEndian.Uint16(raw[off+6 : off+8]))
+		chunk := raw[off+fragHeaderSize:]
+		if totalFrags < 2 || fragIdx >= totalFrags {
+			return
+		}
+		assembled := e.reasm.feed(msgID, fragIdx, totalFrags, chunk)
+		if assembled == nil {
+			return
+		}
+		if e.routeChannelDatagram != nil {
+			e.routeChannelDatagram(id, assembled)
+		}
 
 	default:
 		// Unknown frame type — discard.

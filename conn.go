@@ -146,7 +146,7 @@ func newConn(stream io.ReadWriteCloser, dg datagrammer, closer io.Closer, opener
 		close(done)
 	}()
 
-	return &Conn{
+	c := &Conn{
 		instanceID:   instanceID,
 		exec:         exec,
 		reasm:        newReassembler(DefaultFragmentTimeout, done),
@@ -154,6 +154,22 @@ func newConn(stream io.ReadWriteCloser, dg datagrammer, closer io.Closer, opener
 		ctx:          ctx,
 		cancel:       cancel,
 	}
+
+	// Wire legacy datagram channel routing through the executor.
+	exec.routeChannelDatagram = func(id uint16, payload []byte) {
+		c.routeToChannel(id, payload)
+	}
+	exec.drainChannelQueues = func() {
+		c.mu.Lock()
+		for _, ch := range c.dgIncoming {
+			for len(ch) > 0 {
+				<-ch
+			}
+		}
+		c.mu.Unlock()
+	}
+
+	return c
 }
 
 // SetPairingRecord stores a PairingRecord for deriving per-channel
@@ -300,6 +316,8 @@ func (c *Conn) Recv(ctx context.Context) ([]byte, error) {
 // SendDatagram sends an unreliable datagram to the peer. The executor
 // handles encryption, framing, and fragmentation.
 func (c *Conn) SendDatagram(data []byte) error {
+	// Sync payload limit to executor (legacy field may be overridden by tests).
+	c.exec.maxDgPayload = c.maxDgPayload
 	return c.exec.sendDatagram(data)
 }
 
@@ -426,26 +444,33 @@ func (c *Conn) Close() error {
 }
 
 // fallbackToRelay forces a fallback from the direct path to relay.
-// Drives the session machine through the appropriate transitions.
+// Submits events to the executor so commands are properly executed.
 func (c *Conn) fallbackToRelay() {
 	switch m := c.exec.machine.(type) {
 	case *BackendMachine:
 		switch m.State {
 		case BackendLANActive:
-			m.HandleEvent(EventPingTimeout) // → LANDegraded
+			c.exec.submit(event{id: EventPingTimeout})
+			// Give the event loop time to process.
+			time.Sleep(10 * time.Millisecond)
 			m.PingFailures = 2
-			m.HandleEvent(EventPingTimeout) // → RelayBackoff
+			c.exec.submit(event{id: EventPingTimeout})
+			time.Sleep(10 * time.Millisecond)
 		case BackendLANDegraded:
 			m.PingFailures = 2
-			m.HandleEvent(EventPingTimeout)
+			c.exec.submit(event{id: EventPingTimeout})
+			time.Sleep(10 * time.Millisecond)
 		case BackendLANOffered:
-			m.HandleEvent(EventOfferTimeout)
+			c.exec.submit(event{id: EventOfferTimeout})
+			time.Sleep(10 * time.Millisecond)
 		}
 	case *ClientMachine:
 		switch m.State {
 		case ClientLANActive:
-			m.HandleEvent(EventLanError)
-			m.HandleEvent(EventRelayOk)
+			c.exec.submit(event{id: EventLanError})
+			time.Sleep(10 * time.Millisecond)
+			c.exec.submit(event{id: EventRelayOk})
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
