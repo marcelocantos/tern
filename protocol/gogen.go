@@ -22,6 +22,62 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 	b.WriteString("// Code generated from protocol/*.yaml. DO NOT EDIT.\n\n")
 	fmt.Fprintf(&b, "package %s\n\n", pkgName)
 
+	// Detect if frozen import is needed.
+	needsFrozen := false
+	for _, v := range p.Vars {
+		if v.Type == VarSetString {
+			needsFrozen = true
+			break
+		}
+	}
+	if !needsFrozen {
+		for _, sd := range p.Structs {
+			for _, f := range sd.Fields {
+				if f.Type == VarSetString {
+					needsFrozen = true
+					break
+				}
+			}
+		}
+	}
+
+	b.WriteString("import (\n")
+	b.WriteString("\t\"github.com/marcelocantos/tern/protocol\"\n")
+	if needsFrozen {
+		b.WriteString("\t\"github.com/arr-ai/frozen\"\n")
+	}
+	b.WriteString(")\n\n")
+
+	b.WriteString("type (\n")
+	b.WriteString("\tState      = protocol.State\n")
+	b.WriteString("\tMsgType    = protocol.MsgType\n")
+	b.WriteString("\tGuardID    = protocol.GuardID\n")
+	b.WriteString("\tActionID   = protocol.ActionID\n")
+	b.WriteString("\tProtocol   = protocol.Protocol\n")
+	b.WriteString("\tActor      = protocol.Actor\n")
+	b.WriteString("\tTransition = protocol.Transition\n")
+	b.WriteString("\tSend       = protocol.Send\n")
+	b.WriteString("\tMessage    = protocol.Message\n")
+	b.WriteString("\tVarDef     = protocol.VarDef\n")
+	b.WriteString("\tVarUpdate  = protocol.VarUpdate\n")
+	b.WriteString("\tGuardDef   = protocol.GuardDef\n")
+	b.WriteString("\tOperator   = protocol.Operator\n")
+	b.WriteString("\tAdvAction  = protocol.AdvAction\n")
+	b.WriteString("\tProperty   = protocol.Property\n")
+	b.WriteString(")\n\n")
+
+	// Constructor aliases.
+	b.WriteString("var (\n")
+	b.WriteString("\tRecv     = protocol.Recv\n")
+	b.WriteString("\tInternal = protocol.Internal\n")
+	b.WriteString("\tInvariant = protocol.Invariant\n")
+	b.WriteString("\tLiveness  = protocol.Liveness\n")
+	b.WriteString(")\n\n")
+
+	if needsFrozen {
+		b.WriteString("var _ frozen.Set[string] // suppress unused import\n\n")
+	}
+
 	// --- Enum constants ---
 
 	for _, a := range p.Actors {

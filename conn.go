@@ -64,6 +64,11 @@ type Conn struct {
 	// Path routing — relay is permanent, direct (LAN/STUN) is optional.
 	router *pathRouter
 
+	// Path routing — relay is permanent, direct (LAN/STUN) is optional.
+	// TODO: Replace ad-hoc router with generated BackendMachine/
+	// ClientMachine from session_gen.go. The machine's OnChange
+	// callback will drive resource rebinding.
+
 	// Encryption for the primary stream. Nil means raw mode.
 	channel *crypto.Channel
 
