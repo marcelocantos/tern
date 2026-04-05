@@ -141,6 +141,7 @@ const (
 // Events.
 const (
 	EventAppClose EventID = "app_close"
+	EventAppForceFallback EventID = "app_force_fallback"
 	EventAppLaunch EventID = "app_launch"
 	EventAppRecv EventID = "app_recv"
 	EventAppRecvDatagram EventID = "app_recv_datagram"
@@ -284,6 +285,9 @@ func SessionProtocol() *Protocol {
 				{From: "RelayBackoff", To: "LANOffered", On: Internal("backoff_expired"), Sends: []Send{{To: "client", Msg: "lan_offer", Fields: map[string]string{"addr": "lan_addr", "challenge": "challenge_bytes", }}, }},
 				{From: "RelayBackoff", To: "LANOffered", On: Internal("lan_server_changed"), Sends: []Send{{To: "client", Msg: "lan_offer", Fields: map[string]string{"addr": "lan_addr", "challenge": "challenge_bytes", }}, }, Updates: []VarUpdate{{Var: "backoff_level", Expr: "0"}, }},
 				{From: "RelayConnected", To: "LANOffered", On: Internal("readvertise_tick"), Guard: "lan_server_available", Sends: []Send{{To: "client", Msg: "lan_offer", Fields: map[string]string{"addr": "lan_addr", "challenge": "challenge_bytes", }}, }},
+				{From: "LANOffered", To: "RelayConnected", On: Internal("app_force_fallback"), Updates: []VarUpdate{{Var: "lan_signal", Expr: "\"pending\""}, }},
+				{From: "LANActive", To: "RelayBackoff", On: Internal("app_force_fallback"), Do: "fallback_to_relay", Updates: []VarUpdate{{Var: "backoff_level", Expr: "Min(backoff_level + 1, max_backoff_level)"}, {Var: "b_active_path", Expr: "\"relay\""}, {Var: "b_dispatcher_path", Expr: "\"relay\""}, {Var: "monitor_target", Expr: "\"none\""}, {Var: "lan_signal", Expr: "\"pending\""}, {Var: "ping_failures", Expr: "0"}, }},
+				{From: "LANDegraded", To: "RelayBackoff", On: Internal("app_force_fallback"), Do: "fallback_to_relay", Updates: []VarUpdate{{Var: "backoff_level", Expr: "Min(backoff_level + 1, max_backoff_level)"}, {Var: "b_active_path", Expr: "\"relay\""}, {Var: "b_dispatcher_path", Expr: "\"relay\""}, {Var: "monitor_target", Expr: "\"none\""}, {Var: "lan_signal", Expr: "\"pending\""}, {Var: "ping_failures", Expr: "0"}, }},
 				{From: "RelayConnected", To: "Paired", On: Internal("disconnect")},
 			}},
 			{Name: "client", Initial: "Idle", Transitions: []Transition{
@@ -296,7 +300,7 @@ func SessionProtocol() *Protocol {
 				{From: "ShowCode", To: "WaitPairComplete", On: Internal("code_displayed")},
 				{From: "WaitPairComplete", To: "Paired", On: Recv("pair_complete"), Do: "store_secret"},
 				{From: "Paired", To: "Reconnect", On: Internal("app_launch")},
-				{From: "Reconnect", To: "SendAuth", On: Internal("relay_connected"), Sends: []Send{{To: "backend", Msg: "auth_request", Fields: map[string]string{"nonce": "\"nonce_1\"", "key": "client_shared_key", "device_id": "\"device_1\"", "secret": "device_secret", }}, }},
+				{From: "Reconnect", To: "SendAuth", On: Internal("relay_connected"), Sends: []Send{{To: "backend", Msg: "auth_request", Fields: map[string]string{"secret": "device_secret", "nonce": "\"nonce_1\"", "key": "client_shared_key", "device_id": "\"device_1\"", }}, }},
 				{From: "SendAuth", To: "SessionActive", On: Recv("auth_ok")},
 				{From: "SessionActive", To: "RelayConnected", On: Internal("session_established")},
 				{From: "RelayConnected", To: "RelayConnected", On: Internal("app_send")},
@@ -331,6 +335,9 @@ func SessionProtocol() *Protocol {
 				{From: "LANActive", To: "RelayFallback", On: Internal("lan_error"), Do: "fallback_to_relay", Updates: []VarUpdate{{Var: "c_active_path", Expr: "\"relay\""}, {Var: "c_dispatcher_path", Expr: "\"relay\""}, {Var: "lan_signal", Expr: "\"pending\""}, }},
 				{From: "RelayFallback", To: "RelayConnected", On: Internal("relay_ok")},
 				{From: "LANActive", To: "LANConnecting", On: Recv("lan_offer"), Guard: "lan_enabled", Do: "dial_lan"},
+				{From: "LANConnecting", To: "RelayConnected", On: Internal("app_force_fallback")},
+				{From: "LANVerifying", To: "RelayConnected", On: Internal("app_force_fallback"), Updates: []VarUpdate{{Var: "c_dispatcher_path", Expr: "\"relay\""}, }},
+				{From: "LANActive", To: "RelayConnected", On: Internal("app_force_fallback"), Do: "fallback_to_relay", Updates: []VarUpdate{{Var: "c_active_path", Expr: "\"relay\""}, {Var: "c_dispatcher_path", Expr: "\"relay\""}, {Var: "lan_signal", Expr: "\"pending\""}, }},
 				{From: "RelayConnected", To: "Paired", On: Internal("disconnect")},
 			}},
 			{Name: "relay", Initial: "Idle", Transitions: []Transition{
@@ -806,6 +813,45 @@ func (m *BackendMachine) Step(event EventID) (bool, error) {
 	case m.State == BackendRelayConnected && event == EventReadvertiseTick && m.Guards[GuardLanServerAvailable] != nil && m.Guards[GuardLanServerAvailable]():
 		m.State = BackendLANOffered
 		return true, nil
+	case m.State == BackendLANOffered && event == EventAppForceFallback:
+		m.LanSignal = "pending"
+		if m.OnChange != nil { m.OnChange("lan_signal") }
+		m.State = BackendRelayConnected
+		return true, nil
+	case m.State == BackendLANActive && event == EventAppForceFallback:
+		if fn := m.Actions[ActionFallbackToRelay]; fn != nil {
+			if err := fn(); err != nil { return false, err }
+		}
+		// backoff_level: Min(backoff_level + 1, max_backoff_level) (set by action)
+		m.BActivePath = "relay"
+		if m.OnChange != nil { m.OnChange("b_active_path") }
+		m.BDispatcherPath = "relay"
+		if m.OnChange != nil { m.OnChange("b_dispatcher_path") }
+		m.MonitorTarget = "none"
+		if m.OnChange != nil { m.OnChange("monitor_target") }
+		m.LanSignal = "pending"
+		if m.OnChange != nil { m.OnChange("lan_signal") }
+		m.PingFailures = 0
+		if m.OnChange != nil { m.OnChange("ping_failures") }
+		m.State = BackendRelayBackoff
+		return true, nil
+	case m.State == BackendLANDegraded && event == EventAppForceFallback:
+		if fn := m.Actions[ActionFallbackToRelay]; fn != nil {
+			if err := fn(); err != nil { return false, err }
+		}
+		// backoff_level: Min(backoff_level + 1, max_backoff_level) (set by action)
+		m.BActivePath = "relay"
+		if m.OnChange != nil { m.OnChange("b_active_path") }
+		m.BDispatcherPath = "relay"
+		if m.OnChange != nil { m.OnChange("b_dispatcher_path") }
+		m.MonitorTarget = "none"
+		if m.OnChange != nil { m.OnChange("monitor_target") }
+		m.LanSignal = "pending"
+		if m.OnChange != nil { m.OnChange("lan_signal") }
+		m.PingFailures = 0
+		if m.OnChange != nil { m.OnChange("ping_failures") }
+		m.State = BackendRelayBackoff
+		return true, nil
 	case m.State == BackendRelayConnected && event == EventDisconnect:
 		m.State = BackendPaired
 		return true, nil
@@ -1084,6 +1130,45 @@ func (m *BackendMachine) HandleEvent(ev EventID) ([]CmdID, error) {
 	case m.State == BackendRelayConnected && ev == EventReadvertiseTick && m.Guards[GuardLanServerAvailable] != nil && m.Guards[GuardLanServerAvailable]():
 		m.State = BackendLANOffered
 		return []CmdID{CmdSendLanOffer}, nil
+	case m.State == BackendLANOffered && ev == EventAppForceFallback:
+		m.LanSignal = "pending"
+		if m.OnChange != nil { m.OnChange("lan_signal") }
+		m.State = BackendRelayConnected
+		return []CmdID{CmdResetLanReady}, nil
+	case m.State == BackendLANActive && ev == EventAppForceFallback:
+		if fn := m.Actions[ActionFallbackToRelay]; fn != nil {
+			if err := fn(); err != nil { return nil, err }
+		}
+		// backoff_level: Min(backoff_level + 1, max_backoff_level) (set by action)
+		m.BActivePath = "relay"
+		if m.OnChange != nil { m.OnChange("b_active_path") }
+		m.BDispatcherPath = "relay"
+		if m.OnChange != nil { m.OnChange("b_dispatcher_path") }
+		m.MonitorTarget = "none"
+		if m.OnChange != nil { m.OnChange("monitor_target") }
+		m.LanSignal = "pending"
+		if m.OnChange != nil { m.OnChange("lan_signal") }
+		m.PingFailures = 0
+		if m.OnChange != nil { m.OnChange("ping_failures") }
+		m.State = BackendRelayBackoff
+		return []CmdID{CmdStopMonitor, CmdCancelPongTimeout, CmdStopLanStreamReader, CmdStopLanDgReader, CmdCloseLanPath, CmdResetLanReady, CmdStartBackoffTimer}, nil
+	case m.State == BackendLANDegraded && ev == EventAppForceFallback:
+		if fn := m.Actions[ActionFallbackToRelay]; fn != nil {
+			if err := fn(); err != nil { return nil, err }
+		}
+		// backoff_level: Min(backoff_level + 1, max_backoff_level) (set by action)
+		m.BActivePath = "relay"
+		if m.OnChange != nil { m.OnChange("b_active_path") }
+		m.BDispatcherPath = "relay"
+		if m.OnChange != nil { m.OnChange("b_dispatcher_path") }
+		m.MonitorTarget = "none"
+		if m.OnChange != nil { m.OnChange("monitor_target") }
+		m.LanSignal = "pending"
+		if m.OnChange != nil { m.OnChange("lan_signal") }
+		m.PingFailures = 0
+		if m.OnChange != nil { m.OnChange("ping_failures") }
+		m.State = BackendRelayBackoff
+		return []CmdID{CmdStopMonitor, CmdCancelPongTimeout, CmdStopLanStreamReader, CmdStopLanDgReader, CmdCloseLanPath, CmdResetLanReady, CmdStartBackoffTimer}, nil
 	case m.State == BackendRelayConnected && ev == EventDisconnect:
 		m.State = BackendPaired
 		return nil, nil
@@ -1298,6 +1383,26 @@ func (m *ClientMachine) Step(event EventID) (bool, error) {
 	case m.State == ClientRelayFallback && event == EventRelayOk:
 		m.State = ClientRelayConnected
 		return true, nil
+	case m.State == ClientLANConnecting && event == EventAppForceFallback:
+		m.State = ClientRelayConnected
+		return true, nil
+	case m.State == ClientLANVerifying && event == EventAppForceFallback:
+		m.CDispatcherPath = "relay"
+		if m.OnChange != nil { m.OnChange("c_dispatcher_path") }
+		m.State = ClientRelayConnected
+		return true, nil
+	case m.State == ClientLANActive && event == EventAppForceFallback:
+		if fn := m.Actions[ActionFallbackToRelay]; fn != nil {
+			if err := fn(); err != nil { return false, err }
+		}
+		m.CActivePath = "relay"
+		if m.OnChange != nil { m.OnChange("c_active_path") }
+		m.CDispatcherPath = "relay"
+		if m.OnChange != nil { m.OnChange("c_dispatcher_path") }
+		m.LanSignal = "pending"
+		if m.OnChange != nil { m.OnChange("lan_signal") }
+		m.State = ClientRelayConnected
+		return true, nil
 	case m.State == ClientRelayConnected && event == EventDisconnect:
 		m.State = ClientPaired
 		return true, nil
@@ -1477,6 +1582,26 @@ func (m *ClientMachine) HandleEvent(ev EventID) ([]CmdID, error) {
 		}
 		m.State = ClientLANConnecting
 		return []CmdID{CmdStopLanStreamReader, CmdStopLanDgReader, CmdCloseLanPath, CmdDialLan}, nil
+	case m.State == ClientLANConnecting && ev == EventAppForceFallback:
+		m.State = ClientRelayConnected
+		return nil, nil
+	case m.State == ClientLANVerifying && ev == EventAppForceFallback:
+		m.CDispatcherPath = "relay"
+		if m.OnChange != nil { m.OnChange("c_dispatcher_path") }
+		m.State = ClientRelayConnected
+		return []CmdID{CmdStopLanStreamReader, CmdStopLanDgReader, CmdCloseLanPath}, nil
+	case m.State == ClientLANActive && ev == EventAppForceFallback:
+		if fn := m.Actions[ActionFallbackToRelay]; fn != nil {
+			if err := fn(); err != nil { return nil, err }
+		}
+		m.CActivePath = "relay"
+		if m.OnChange != nil { m.OnChange("c_active_path") }
+		m.CDispatcherPath = "relay"
+		if m.OnChange != nil { m.OnChange("c_dispatcher_path") }
+		m.LanSignal = "pending"
+		if m.OnChange != nil { m.OnChange("lan_signal") }
+		m.State = ClientRelayConnected
+		return []CmdID{CmdStopLanStreamReader, CmdStopLanDgReader, CmdCloseLanPath, CmdResetLanReady}, nil
 	case m.State == ClientRelayConnected && ev == EventDisconnect:
 		m.State = ClientPaired
 		return nil, nil

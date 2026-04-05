@@ -105,6 +105,7 @@ public enum EventID: String, Sendable {
     case appSendDatagram = "app_send_datagram"
     case appRecvDatagram = "app_recv_datagram"
     case appClose = "app_close"
+    case appForceFallback = "app_force_fallback"
     case relayStreamData = "relay_stream_data"
     case relayStreamError = "relay_stream_error"
     case relayDatagram = "relay_datagram"
@@ -245,6 +246,9 @@ public enum SessionProtocol {
         (from: "RelayBackoff", to: "LANOffered", on: "backoff_expired", onKind: "internal", guard: nil, action: nil, sends: [(to: "client", msg: "lan_offer")]),
         (from: "RelayBackoff", to: "LANOffered", on: "lan_server_changed", onKind: "internal", guard: nil, action: nil, sends: [(to: "client", msg: "lan_offer")]),
         (from: "RelayConnected", to: "LANOffered", on: "readvertise_tick", onKind: "internal", guard: "lan_server_available", action: nil, sends: [(to: "client", msg: "lan_offer")]),
+        (from: "LANOffered", to: "RelayConnected", on: "app_force_fallback", onKind: "internal", guard: nil, action: nil, sends: []),
+        (from: "LANActive", to: "RelayBackoff", on: "app_force_fallback", onKind: "internal", guard: nil, action: "fallback_to_relay", sends: []),
+        (from: "LANDegraded", to: "RelayBackoff", on: "app_force_fallback", onKind: "internal", guard: nil, action: "fallback_to_relay", sends: []),
         (from: "RelayConnected", to: "Paired", on: "disconnect", onKind: "internal", guard: nil, action: nil, sends: []),
     ]
 
@@ -296,6 +300,9 @@ public enum SessionProtocol {
         (from: "LANActive", to: "RelayFallback", on: "lan_error", onKind: "internal", guard: nil, action: "fallback_to_relay", sends: []),
         (from: "RelayFallback", to: "RelayConnected", on: "relay_ok", onKind: "internal", guard: nil, action: nil, sends: []),
         (from: "LANActive", to: "LANConnecting", on: "lan_offer", onKind: "recv", guard: "lan_enabled", action: "dial_lan", sends: []),
+        (from: "LANConnecting", to: "RelayConnected", on: "app_force_fallback", onKind: "internal", guard: nil, action: nil, sends: []),
+        (from: "LANVerifying", to: "RelayConnected", on: "app_force_fallback", onKind: "internal", guard: nil, action: nil, sends: []),
+        (from: "LANActive", to: "RelayConnected", on: "app_force_fallback", onKind: "internal", guard: nil, action: "fallback_to_relay", sends: []),
         (from: "RelayConnected", to: "Paired", on: "disconnect", onKind: "internal", guard: nil, action: nil, sends: []),
     ]
 
@@ -585,6 +592,30 @@ public final class BackendMachine: @unchecked Sendable {
         case (.relayConnected, .readvertiseTick) where guards[.lanServerAvailable]?() == true:
             state = .lANOffered
             return [.sendLanOffer]
+        case (.lANOffered, .appForceFallback):
+            lanSignal = "pending"
+            state = .relayConnected
+            return [.resetLanReady]
+        case (.lANActive, .appForceFallback):
+            try actions[.fallbackToRelay]?()
+            // backoff_level: Min(backoff_level + 1, max_backoff_level) (set by action)
+            bActivePath = "relay"
+            bDispatcherPath = "relay"
+            monitorTarget = "none"
+            lanSignal = "pending"
+            pingFailures = 0
+            state = .relayBackoff
+            return [.stopMonitor, .cancelPongTimeout, .stopLanStreamReader, .stopLanDgReader, .closeLanPath, .resetLanReady, .startBackoffTimer]
+        case (.lANDegraded, .appForceFallback):
+            try actions[.fallbackToRelay]?()
+            // backoff_level: Min(backoff_level + 1, max_backoff_level) (set by action)
+            bActivePath = "relay"
+            bDispatcherPath = "relay"
+            monitorTarget = "none"
+            lanSignal = "pending"
+            pingFailures = 0
+            state = .relayBackoff
+            return [.stopMonitor, .cancelPongTimeout, .stopLanStreamReader, .stopLanDgReader, .closeLanPath, .resetLanReady, .startBackoffTimer]
         case (.relayConnected, .disconnect):
             state = .paired
             return []
@@ -880,6 +911,20 @@ public final class ClientMachine: @unchecked Sendable {
             try actions[.dialLan]?()
             state = .lANConnecting
             return [.stopLanStreamReader, .stopLanDgReader, .closeLanPath, .dialLan]
+        case (.lANConnecting, .appForceFallback):
+            state = .relayConnected
+            return []
+        case (.lANVerifying, .appForceFallback):
+            cDispatcherPath = "relay"
+            state = .relayConnected
+            return [.stopLanStreamReader, .stopLanDgReader, .closeLanPath]
+        case (.lANActive, .appForceFallback):
+            try actions[.fallbackToRelay]?()
+            cActivePath = "relay"
+            cDispatcherPath = "relay"
+            lanSignal = "pending"
+            state = .relayConnected
+            return [.stopLanStreamReader, .stopLanDgReader, .closeLanPath, .resetLanReady]
         case (.relayConnected, .disconnect):
             state = .paired
             return []

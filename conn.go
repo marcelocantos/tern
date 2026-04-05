@@ -261,29 +261,11 @@ func (c *Conn) Close() error {
 	return relay.closer.Close()
 }
 
-// fallbackToRelay forces a fallback from the direct path to relay.
-// Submits events to the executor and waits for each to be processed.
+// fallbackToRelay forces an immediate fallback from the direct path
+// to relay. The machine handles this via app_force_fallback transitions
+// from any LAN-related state.
 func (c *Conn) fallbackToRelay() {
-	switch m := c.exec.machine.(type) {
-	case *BackendMachine:
-		switch m.State {
-		case BackendLANActive:
-			c.exec.submitSync(event{id: EventPingTimeout})
-			m.PingFailures = 2
-			c.exec.submitSync(event{id: EventPingTimeout})
-		case BackendLANDegraded:
-			m.PingFailures = 2
-			c.exec.submitSync(event{id: EventPingTimeout})
-		case BackendLANOffered:
-			c.exec.submitSync(event{id: EventOfferTimeout})
-		}
-	case *ClientMachine:
-		switch m.State {
-		case ClientLANActive:
-			c.exec.submitSync(event{id: EventLanError})
-			c.exec.submitSync(event{id: EventRelayOk})
-		}
-	}
+	c.exec.submitSync(event{id: EventAppForceFallback})
 }
 
 // isDirectActive returns true if the direct path is active.

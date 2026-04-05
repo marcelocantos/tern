@@ -30,6 +30,7 @@ MSG_path_ping == "path_ping"
 MSG_path_pong == "path_pong"
 
 \* Event types
+EVT_app_force_fallback == "app_force_fallback"
 EVT_app_send == "app_send"
 EVT_app_send_datagram == "app_send_datagram"
 EVT_backoff_expired == "backoff_expired"
@@ -483,6 +484,43 @@ backend_RelayConnected_to_LANOffered_readvertise_tick_lan_server_available ==
 
 Cmds_backend_RelayConnected_to_LANOffered_readvertise_tick_lan_server_available == {CMD_send_lan_offer}
 
+\* backend: LANOffered -> RelayConnected (app_force_fallback)
+backend_LANOffered_to_RelayConnected_app_force_fallback ==
+    /\ backend_state = backend_LANOffered
+    /\ backend_state' = backend_RelayConnected
+    /\ lan_signal' = "pending"
+    /\ UNCHANGED <<client_state, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, received_lan_verify, received_path_pong, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+Cmds_backend_LANOffered_to_RelayConnected_app_force_fallback == {CMD_reset_lan_ready}
+
+\* backend: LANActive -> RelayBackoff (app_force_fallback)
+backend_LANActive_to_RelayBackoff_app_force_fallback ==
+    /\ backend_state = backend_LANActive
+    /\ backend_state' = backend_RelayBackoff
+    /\ backoff_level' = Min(backoff_level + 1, max_backoff_level)
+    /\ b_active_path' = "relay"
+    /\ b_dispatcher_path' = "relay"
+    /\ monitor_target' = "none"
+    /\ lan_signal' = "pending"
+    /\ ping_failures' = 0
+    /\ UNCHANGED <<client_state, c_active_path, c_dispatcher_path, received_lan_verify, received_path_pong, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+Cmds_backend_LANActive_to_RelayBackoff_app_force_fallback == {CMD_stop_monitor, CMD_cancel_pong_timeout, CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_reset_lan_ready, CMD_start_backoff_timer}
+
+\* backend: LANDegraded -> RelayBackoff (app_force_fallback)
+backend_LANDegraded_to_RelayBackoff_app_force_fallback ==
+    /\ backend_state = backend_LANDegraded
+    /\ backend_state' = backend_RelayBackoff
+    /\ backoff_level' = Min(backoff_level + 1, max_backoff_level)
+    /\ b_active_path' = "relay"
+    /\ b_dispatcher_path' = "relay"
+    /\ monitor_target' = "none"
+    /\ lan_signal' = "pending"
+    /\ ping_failures' = 0
+    /\ UNCHANGED <<client_state, c_active_path, c_dispatcher_path, received_lan_verify, received_path_pong, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+Cmds_backend_LANDegraded_to_RelayBackoff_app_force_fallback == {CMD_stop_monitor, CMD_cancel_pong_timeout, CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_reset_lan_ready, CMD_start_backoff_timer}
+
 
 \* client: RelayConnected -> RelayConnected (app_send)
 client_RelayConnected_to_RelayConnected_app_send ==
@@ -754,6 +792,32 @@ client_LANActive_to_LANConnecting_on_lan_offer_lan_enabled ==
 
 Cmds_client_LANActive_to_LANConnecting_on_lan_offer_lan_enabled == {CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_dial_lan}
 
+\* client: LANConnecting -> RelayConnected (app_force_fallback)
+client_LANConnecting_to_RelayConnected_app_force_fallback ==
+    /\ client_state = client_LANConnecting
+    /\ client_state' = client_RelayConnected
+    /\ UNCHANGED <<backend_state, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, c_dispatcher_path, monitor_target, lan_signal, received_lan_verify, received_path_pong, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+\* client: LANVerifying -> RelayConnected (app_force_fallback)
+client_LANVerifying_to_RelayConnected_app_force_fallback ==
+    /\ client_state = client_LANVerifying
+    /\ client_state' = client_RelayConnected
+    /\ c_dispatcher_path' = "relay"
+    /\ UNCHANGED <<backend_state, ping_failures, backoff_level, b_active_path, c_active_path, b_dispatcher_path, monitor_target, lan_signal, received_lan_verify, received_path_pong, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+Cmds_client_LANVerifying_to_RelayConnected_app_force_fallback == {CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path}
+
+\* client: LANActive -> RelayConnected (app_force_fallback)
+client_LANActive_to_RelayConnected_app_force_fallback ==
+    /\ client_state = client_LANActive
+    /\ client_state' = client_RelayConnected
+    /\ c_active_path' = "relay"
+    /\ c_dispatcher_path' = "relay"
+    /\ lan_signal' = "pending"
+    /\ UNCHANGED <<backend_state, ping_failures, backoff_level, b_active_path, b_dispatcher_path, monitor_target, received_lan_verify, received_path_pong, received_lan_offer, received_lan_confirm, received_path_ping>>
+
+Cmds_client_LANActive_to_RelayConnected_app_force_fallback == {CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_reset_lan_ready}
+
 
 Next ==
     \/ backend_RelayConnected_to_RelayConnected_app_send
@@ -795,6 +859,9 @@ Next ==
     \/ backend_RelayBackoff_to_LANOffered_backoff_expired
     \/ backend_RelayBackoff_to_LANOffered_lan_server_changed
     \/ backend_RelayConnected_to_LANOffered_readvertise_tick_lan_server_available
+    \/ backend_LANOffered_to_RelayConnected_app_force_fallback
+    \/ backend_LANActive_to_RelayBackoff_app_force_fallback
+    \/ backend_LANDegraded_to_RelayBackoff_app_force_fallback
     \/ client_RelayConnected_to_RelayConnected_app_send
     \/ client_RelayConnected_to_RelayConnected_relay_stream_data
     \/ client_LANConnecting_to_LANConnecting_app_send
@@ -827,6 +894,9 @@ Next ==
     \/ client_LANActive_to_RelayFallback_lan_error
     \/ client_RelayFallback_to_RelayConnected_relay_ok
     \/ client_LANActive_to_LANConnecting_on_lan_offer_lan_enabled
+    \/ client_LANConnecting_to_RelayConnected_app_force_fallback
+    \/ client_LANVerifying_to_RelayConnected_app_force_fallback
+    \/ client_LANActive_to_RelayConnected_app_force_fallback
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
@@ -896,6 +966,9 @@ DegradedLeadsToResolutionOrFallback == (backend_state = backend_LANDegraded) ~> 
 \* backend_RelayBackoff_to_LANOffered_backoff_expired emits: CMD_send_lan_offer
 \* backend_RelayBackoff_to_LANOffered_lan_server_changed emits: CMD_send_lan_offer
 \* backend_RelayConnected_to_LANOffered_readvertise_tick_lan_server_available emits: CMD_send_lan_offer
+\* backend_LANOffered_to_RelayConnected_app_force_fallback emits: CMD_reset_lan_ready
+\* backend_LANActive_to_RelayBackoff_app_force_fallback emits: CMD_stop_monitor, CMD_cancel_pong_timeout, CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_reset_lan_ready, CMD_start_backoff_timer
+\* backend_LANDegraded_to_RelayBackoff_app_force_fallback emits: CMD_stop_monitor, CMD_cancel_pong_timeout, CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_reset_lan_ready, CMD_start_backoff_timer
 \* client_RelayConnected_to_RelayConnected_app_send emits: CMD_write_active_stream
 \* client_RelayConnected_to_RelayConnected_relay_stream_data emits: CMD_deliver_recv
 \* client_LANConnecting_to_LANConnecting_app_send emits: CMD_write_active_stream
@@ -924,5 +997,7 @@ DegradedLeadsToResolutionOrFallback == (backend_state = backend_LANDegraded) ~> 
 \* client_LANActive_to_LANActive_on_path_ping emits: CMD_send_path_pong
 \* client_LANActive_to_RelayFallback_lan_error emits: CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_reset_lan_ready
 \* client_LANActive_to_LANConnecting_on_lan_offer_lan_enabled emits: CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_dial_lan
+\* client_LANVerifying_to_RelayConnected_app_force_fallback emits: CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path
+\* client_LANActive_to_RelayConnected_app_force_fallback emits: CMD_stop_lan_stream_reader, CMD_stop_lan_dg_reader, CMD_close_lan_path, CMD_reset_lan_ready
 
 ====

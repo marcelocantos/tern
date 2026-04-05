@@ -101,6 +101,7 @@ enum class ActionID(val value: String) {
 
 enum class EventID(val value: String) {
     AppClose("app_close"),
+    AppForceFallback("app_force_fallback"),
     AppLaunch("app_launch"),
     AppRecv("app_recv"),
     AppRecvDatagram("app_recv_datagram"),
@@ -253,6 +254,9 @@ object BackendTable {
         Transition("RelayBackoff", "LANOffered", "backoff_expired", "internal", null, null, listOf("client" to "lan_offer")),
         Transition("RelayBackoff", "LANOffered", "lan_server_changed", "internal", null, null, listOf("client" to "lan_offer")),
         Transition("RelayConnected", "LANOffered", "readvertise_tick", "internal", "lan_server_available", null, listOf("client" to "lan_offer")),
+        Transition("LANOffered", "RelayConnected", "app_force_fallback", "internal", null, null, emptyList()),
+        Transition("LANActive", "RelayBackoff", "app_force_fallback", "internal", null, "fallback_to_relay", emptyList()),
+        Transition("LANDegraded", "RelayBackoff", "app_force_fallback", "internal", null, "fallback_to_relay", emptyList()),
         Transition("RelayConnected", "Paired", "disconnect", "internal", null, null, emptyList()),
     )
 }
@@ -316,6 +320,9 @@ object ClientTable {
         Transition("LANActive", "RelayFallback", "lan_error", "internal", null, "fallback_to_relay", emptyList()),
         Transition("RelayFallback", "RelayConnected", "relay_ok", "internal", null, null, emptyList()),
         Transition("LANActive", "LANConnecting", "lan_offer", "recv", "lan_enabled", "dial_lan", emptyList()),
+        Transition("LANConnecting", "RelayConnected", "app_force_fallback", "internal", null, null, emptyList()),
+        Transition("LANVerifying", "RelayConnected", "app_force_fallback", "internal", null, null, emptyList()),
+        Transition("LANActive", "RelayConnected", "app_force_fallback", "internal", null, "fallback_to_relay", emptyList()),
         Transition("RelayConnected", "Paired", "disconnect", "internal", null, null, emptyList()),
     )
 }
@@ -699,6 +706,36 @@ class BackendMachine {
                     state = BackendState.LANOffered
                     listOf(CmdID.SendLanOffer)
                 }
+            state == BackendState.LANOffered && ev == EventID.AppForceFallback ->
+                run {
+                    lanSignal = "pending"
+                    state = BackendState.RelayConnected
+                    listOf(CmdID.ResetLanReady)
+                }
+            state == BackendState.LANActive && ev == EventID.AppForceFallback ->
+                run {
+                    actions[ActionID.FallbackToRelay]?.invoke()
+                    // backoff_level: Min(backoff_level + 1, max_backoff_level) (set by action)
+                    bActivePath = "relay"
+                    bDispatcherPath = "relay"
+                    monitorTarget = "none"
+                    lanSignal = "pending"
+                    pingFailures = 0
+                    state = BackendState.RelayBackoff
+                    listOf(CmdID.StopMonitor, CmdID.CancelPongTimeout, CmdID.StopLanStreamReader, CmdID.StopLanDgReader, CmdID.CloseLanPath, CmdID.ResetLanReady, CmdID.StartBackoffTimer)
+                }
+            state == BackendState.LANDegraded && ev == EventID.AppForceFallback ->
+                run {
+                    actions[ActionID.FallbackToRelay]?.invoke()
+                    // backoff_level: Min(backoff_level + 1, max_backoff_level) (set by action)
+                    bActivePath = "relay"
+                    bDispatcherPath = "relay"
+                    monitorTarget = "none"
+                    lanSignal = "pending"
+                    pingFailures = 0
+                    state = BackendState.RelayBackoff
+                    listOf(CmdID.StopMonitor, CmdID.CancelPongTimeout, CmdID.StopLanStreamReader, CmdID.StopLanDgReader, CmdID.CloseLanPath, CmdID.ResetLanReady, CmdID.StartBackoffTimer)
+                }
             state == BackendState.RelayConnected && ev == EventID.Disconnect ->
                 run {
                     state = BackendState.Paired
@@ -962,6 +999,26 @@ class ClientMachine {
                     actions[ActionID.DialLan]?.invoke()
                     state = ClientState.LANConnecting
                     listOf(CmdID.StopLanStreamReader, CmdID.StopLanDgReader, CmdID.CloseLanPath, CmdID.DialLan)
+                }
+            state == ClientState.LANConnecting && ev == EventID.AppForceFallback ->
+                run {
+                    state = ClientState.RelayConnected
+                    emptyList()
+                }
+            state == ClientState.LANVerifying && ev == EventID.AppForceFallback ->
+                run {
+                    cDispatcherPath = "relay"
+                    state = ClientState.RelayConnected
+                    listOf(CmdID.StopLanStreamReader, CmdID.StopLanDgReader, CmdID.CloseLanPath)
+                }
+            state == ClientState.LANActive && ev == EventID.AppForceFallback ->
+                run {
+                    actions[ActionID.FallbackToRelay]?.invoke()
+                    cActivePath = "relay"
+                    cDispatcherPath = "relay"
+                    lanSignal = "pending"
+                    state = ClientState.RelayConnected
+                    listOf(CmdID.StopLanStreamReader, CmdID.StopLanDgReader, CmdID.CloseLanPath, CmdID.ResetLanReady)
                 }
             state == ClientState.RelayConnected && ev == EventID.Disconnect ->
                 run {

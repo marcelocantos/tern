@@ -82,6 +82,7 @@ events:
   app_send_datagram: 'application wants to send a datagram'
   app_recv_datagram: 'application wants to receive a datagram'
   app_close: 'application wants to close the connection'
+  app_force_fallback: 'application requests immediate fallback to relay'
 
   # --- Phase 2: Transport (I/O surface) ---
   relay_stream_data: 'data received on relay stream'
@@ -546,6 +547,54 @@ actors:
               challenge: challenge_bytes
         emits: [send_lan_offer]
 
+      # Force fallback from any LAN state to relay.
+      - from: LANOffered
+        to: RelayConnected
+        on: app_force_fallback
+        updates:
+          lan_signal: '"pending"'
+        emits: [reset_lan_ready]
+
+      - from: LANActive
+        to: RelayBackoff
+        on: app_force_fallback
+        do: fallback_to_relay
+        updates:
+          backoff_level: 'Min(backoff_level + 1, max_backoff_level)'
+          b_active_path: '"relay"'
+          b_dispatcher_path: '"relay"'
+          monitor_target: '"none"'
+          lan_signal: '"pending"'
+          ping_failures: '0'
+        emits:
+          - stop_monitor
+          - cancel_pong_timeout
+          - stop_lan_stream_reader
+          - stop_lan_dg_reader
+          - close_lan_path
+          - reset_lan_ready
+          - start_backoff_timer
+
+      - from: LANDegraded
+        to: RelayBackoff
+        on: app_force_fallback
+        do: fallback_to_relay
+        updates:
+          backoff_level: 'Min(backoff_level + 1, max_backoff_level)'
+          b_active_path: '"relay"'
+          b_dispatcher_path: '"relay"'
+          monitor_target: '"none"'
+          lan_signal: '"pending"'
+          ping_failures: '0'
+        emits:
+          - stop_monitor
+          - cancel_pong_timeout
+          - stop_lan_stream_reader
+          - stop_lan_dg_reader
+          - close_lan_path
+          - reset_lan_ready
+          - start_backoff_timer
+
       # Re-enter pairing on disconnect.
       - from: RelayConnected
         to: Paired
@@ -809,6 +858,35 @@ actors:
           - stop_lan_dg_reader
           - close_lan_path
           - dial_lan
+
+      # Force fallback from any LAN state to relay.
+      - from: LANConnecting
+        to: RelayConnected
+        on: app_force_fallback
+
+      - from: LANVerifying
+        to: RelayConnected
+        on: app_force_fallback
+        updates:
+          c_dispatcher_path: '"relay"'
+        emits:
+          - stop_lan_stream_reader
+          - stop_lan_dg_reader
+          - close_lan_path
+
+      - from: LANActive
+        to: RelayConnected
+        on: app_force_fallback
+        do: fallback_to_relay
+        updates:
+          c_active_path: '"relay"'
+          c_dispatcher_path: '"relay"'
+          lan_signal: '"pending"'
+        emits:
+          - stop_lan_stream_reader
+          - stop_lan_dg_reader
+          - close_lan_path
+          - reset_lan_ready
 
       # Re-enter pairing on disconnect.
       - from: RelayConnected
