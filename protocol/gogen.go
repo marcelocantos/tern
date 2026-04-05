@@ -9,9 +9,11 @@ import (
 	"strings"
 )
 
-// ExportGo writes a Go source file that constructs the Protocol
-// value. The generated file imports the protocol package and defines
-// a function returning *Protocol.
+// ExportGo writes a Go source file with:
+//   - State/message/guard/action enum constants
+//   - Protocol table literal (*Protocol)
+//   - Typed structs from YAML struct definitions
+//   - Per-actor typed state machines with HandleMessage/Step
 func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 	var b strings.Builder
 
@@ -20,11 +22,12 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 	b.WriteString("// Code generated from protocol/*.yaml. DO NOT EDIT.\n\n")
 	fmt.Fprintf(&b, "package %s\n\n", pkgName)
 
-	// State constants per actor.
+	// --- Enum constants ---
+
 	for _, a := range p.Actors {
 		states := collectStates(a)
 		prefix := goConstPrefix(a.Name)
-		b.WriteString("// " + a.Name + " states.\n")
+		fmt.Fprintf(&b, "// %s states.\n", a.Name)
 		b.WriteString("const (\n")
 		for _, s := range states {
 			fmt.Fprintf(&b, "\t%s%s State = %q\n", prefix, s, s)
@@ -32,23 +35,18 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 		b.WriteString(")\n\n")
 	}
 
-	// Message type constants.
-	b.WriteString("// Message types.\n")
-	b.WriteString("const (\n")
+	b.WriteString("// Message types.\nconst (\n")
 	for _, m := range p.Messages {
 		fmt.Fprintf(&b, "\tMsg%s MsgType = %q\n", goCamel(string(m.Type)), m.Type)
 	}
 	b.WriteString(")\n\n")
 
-	// Guard constants.
-	b.WriteString("// Guards.\n")
-	b.WriteString("const (\n")
+	b.WriteString("// Guards.\nconst (\n")
 	for _, g := range p.Guards {
 		fmt.Fprintf(&b, "\tGuard%s GuardID = %q\n", goCamel(string(g.ID)), g.ID)
 	}
 	b.WriteString(")\n\n")
 
-	// Action constants.
 	actions := map[string]bool{}
 	for _, a := range p.Actors {
 		for _, t := range a.Transitions {
@@ -58,19 +56,19 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 		}
 	}
 	if len(actions) > 0 {
-		b.WriteString("// Actions.\n")
-		b.WriteString("const (\n")
+		b.WriteString("// Actions.\nconst (\n")
 		for id := range actions {
 			fmt.Fprintf(&b, "\tAction%s ActionID = %q\n", goCamel(id), id)
 		}
 		b.WriteString(")\n\n")
 	}
 
+	// --- Protocol table literal ---
+
 	fmt.Fprintf(&b, "func %s() *Protocol {\n", funcName)
 	b.WriteString("\treturn &Protocol{\n")
 	fmt.Fprintf(&b, "\t\tName: %q,\n", p.Name)
 
-	// Actors
 	b.WriteString("\t\tActors: []Actor{\n")
 	for _, a := range p.Actors {
 		fmt.Fprintf(&b, "\t\t\t{Name: %q, Initial: %q, Transitions: []Transition{\n", a.Name, a.Initial)
@@ -116,28 +114,24 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 	}
 	b.WriteString("\t\t},\n")
 
-	// Messages
 	b.WriteString("\t\tMessages: []Message{\n")
 	for _, m := range p.Messages {
 		fmt.Fprintf(&b, "\t\t\t{Type: %q, From: %q, To: %q, Desc: %q},\n", m.Type, m.From, m.To, m.Desc)
 	}
 	b.WriteString("\t\t},\n")
 
-	// Vars
 	b.WriteString("\t\tVars: []VarDef{\n")
 	for _, v := range p.Vars {
 		fmt.Fprintf(&b, "\t\t\t{Name: %q, Initial: %q, Desc: %q},\n", v.Name, v.Initial, v.Desc)
 	}
 	b.WriteString("\t\t},\n")
 
-	// Guards
 	b.WriteString("\t\tGuards: []GuardDef{\n")
 	for _, g := range p.Guards {
 		fmt.Fprintf(&b, "\t\t\t{ID: %q, Expr: %q},\n", g.ID, g.Expr)
 	}
 	b.WriteString("\t\t},\n")
 
-	// Operators
 	b.WriteString("\t\tOperators: []Operator{\n")
 	for _, op := range p.Operators {
 		fmt.Fprintf(&b, "\t\t\t{Name: %q, Params: %q, Expr: %q, Desc: %q},\n",
@@ -145,14 +139,12 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 	}
 	b.WriteString("\t\t},\n")
 
-	// AdvActions
 	b.WriteString("\t\tAdvActions: []AdvAction{\n")
 	for _, aa := range p.AdvActions {
 		fmt.Fprintf(&b, "\t\t\t{Name: %q, Desc: %q, Code: %q},\n", aa.Name, aa.Desc, aa.Code)
 	}
 	b.WriteString("\t\t},\n")
 
-	// Properties
 	b.WriteString("\t\tProperties: []Property{\n")
 	for _, prop := range p.Properties {
 		kindStr := "Invariant"
@@ -170,17 +162,8 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 	b.WriteString("\t}\n}\n\n")
 
 	// --- Structs ---
-	needsFrozen := false
-	for _, sd := range p.Structs {
-		for _, f := range sd.Fields {
-			if f.Type == VarSetString {
-				needsFrozen = true
-			}
-		}
-	}
 
 	if len(p.Structs) > 0 {
-		b.WriteString("// --- Structs ---\n\n")
 		for _, sd := range p.Structs {
 			if sd.Desc != "" {
 				fmt.Fprintf(&b, "// %s\n", sd.Desc)
@@ -194,69 +177,178 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 				b.WriteString("\n")
 			}
 			b.WriteString("}\n\n")
-
-			// Converter: vars map -> struct.
-			structName := goCamel(sd.Name)
-			fmt.Fprintf(&b, "// %sFromVars constructs a %s from a flat variable map.\n", structName, structName)
-			fmt.Fprintf(&b, "func %sFromVars(m map[string]any) %s {\n", structName, structName)
-			fmt.Fprintf(&b, "\treturn %s{\n", structName)
-			for _, f := range sd.Fields {
-				fmt.Fprintf(&b, "\t\t%s: %s,\n", goCamel(f.Name), goVarCast(f.Name, f.Type))
-			}
-			b.WriteString("\t}\n}\n\n")
-
-			// Converter: struct -> vars map.
-			fmt.Fprintf(&b, "// ToVars writes a %s into a flat variable map.\n", structName)
-			fmt.Fprintf(&b, "func (s %s) ToVars(vars map[string]any) {\n", structName)
-			for _, f := range sd.Fields {
-				fmt.Fprintf(&b, "\tvars[%q] = s.%s\n", f.Name, goCamel(f.Name))
-			}
-			b.WriteString("}\n\n")
 		}
 	}
 
-	// --- Typed variable state ---
-	if len(p.Vars) > 0 {
-		b.WriteString("// --- Variable state ---\n\n")
-		b.WriteString("// Vars holds the complete protocol variable state.\n")
-		b.WriteString("type Vars struct {\n")
+	// --- Per-actor typed state machines ---
+
+	for _, a := range p.Actors {
+		prefix := goCamel(goConstPrefix(a.Name))
+		stateType := goConstPrefix(a.Name)
+
+		// Collect vars updated by this actor's transitions.
+		actorVarSet := map[string]bool{}
+		for _, t := range a.Transitions {
+			for _, u := range t.Updates {
+				actorVarSet[u.Var] = true
+			}
+		}
+
+		// Machine struct.
+		fmt.Fprintf(&b, "// %sMachine is the generated state machine for the %s actor.\n", prefix, a.Name)
+		fmt.Fprintf(&b, "type %sMachine struct {\n", prefix)
+		fmt.Fprintf(&b, "\tState State\n")
+
+		// Typed variable fields owned by this actor.
 		for _, v := range p.Vars {
+			if !actorVarSet[v.Name] {
+				continue
+			}
 			fmt.Fprintf(&b, "\t%s %s", goCamel(v.Name), goType(v.Type))
 			if v.Desc != "" {
 				fmt.Fprintf(&b, " // %s", v.Desc)
 			}
 			b.WriteString("\n")
 		}
+
+		b.WriteString("\n\tGuards  map[GuardID]func() bool\n")
+		b.WriteString("\tActions map[ActionID]func() error\n")
+		b.WriteString("\tOnChange func(varName string)\n")
 		b.WriteString("}\n\n")
 
-		// FromMap converter.
-		b.WriteString("// VarsFromMap constructs Vars from a flat variable map.\n")
-		b.WriteString("func VarsFromMap(m map[string]any) Vars {\n")
-		b.WriteString("\treturn Vars{\n")
+		// Constructor.
+		fmt.Fprintf(&b, "func New%sMachine() *%sMachine {\n", prefix, prefix)
+		fmt.Fprintf(&b, "\treturn &%sMachine{\n", prefix)
+		fmt.Fprintf(&b, "\t\tState: %s%s,\n", stateType, goCamel(string(a.Initial)))
+
+		// Initial values for owned vars.
 		for _, v := range p.Vars {
-			fmt.Fprintf(&b, "\t\t%s: %s,\n", goCamel(v.Name), goVarCast(v.Name, v.Type))
+			if !actorVarSet[v.Name] {
+				continue
+			}
+			init := goInitialValue(v)
+			if init != "" {
+				fmt.Fprintf(&b, "\t\t%s: %s,\n", goCamel(v.Name), init)
+			}
 		}
+
+		b.WriteString("\t\tGuards:  make(map[GuardID]func() bool),\n")
+		b.WriteString("\t\tActions: make(map[ActionID]func() error),\n")
 		b.WriteString("\t}\n}\n\n")
 
-		// ToMap converter.
-		b.WriteString("// ToMap writes Vars into a flat variable map.\n")
-		b.WriteString("func (v Vars) ToMap(m map[string]any) {\n")
-		for _, v := range p.Vars {
-			fmt.Fprintf(&b, "\tm[%q] = v.%s\n", v.Name, goCamel(v.Name))
-		}
-		b.WriteString("}\n\n")
-	}
+		// HandleMessage.
+		fmt.Fprintf(&b, "func (m *%sMachine) HandleMessage(msg MsgType) (bool, error) {\n", prefix)
+		b.WriteString("\tswitch {\n")
+		for _, t := range a.Transitions {
+			if t.On.Kind != TriggerRecv {
+				continue
+			}
+			guard := ""
+			if t.Guard != "" {
+				guard = fmt.Sprintf(" && m.Guards[Guard%s] != nil && m.Guards[Guard%s]()",
+					goCamel(string(t.Guard)), goCamel(string(t.Guard)))
+			}
+			fmt.Fprintf(&b, "\tcase m.State == %s%s && msg == Msg%s%s:\n",
+				stateType, goCamel(string(t.From)),
+				goCamel(string(t.On.Msg)), guard)
 
-	// Import annotation for frozen if needed.
-	if needsFrozen {
-		b.WriteString("// Note: this package requires github.com/arr-ai/frozen\n")
+			writeGoTransitionBody(&b, t, stateType)
+			b.WriteString("\t\treturn true, nil\n")
+		}
+		b.WriteString("\t}\n\treturn false, nil\n}\n\n")
+
+		// Step.
+		fmt.Fprintf(&b, "func (m *%sMachine) Step() (bool, error) {\n", prefix)
+		b.WriteString("\tswitch {\n")
+		for _, t := range a.Transitions {
+			if t.On.Kind != TriggerInternal {
+				continue
+			}
+			guard := ""
+			if t.Guard != "" {
+				guard = fmt.Sprintf(" && m.Guards[Guard%s] != nil && m.Guards[Guard%s]()",
+					goCamel(string(t.Guard)), goCamel(string(t.Guard)))
+			}
+			fmt.Fprintf(&b, "\tcase m.State == %s%s%s:\n",
+				stateType, goCamel(string(t.From)), guard)
+
+			writeGoTransitionBody(&b, t, stateType)
+			b.WriteString("\t\treturn true, nil\n")
+		}
+		b.WriteString("\t}\n\treturn false, nil\n}\n\n")
 	}
 
 	_, err := io.WriteString(w, b.String())
 	return err
 }
 
-// goType maps a VarType to its Go type string.
+// writeGoTransitionBody emits the action call, variable updates, state
+// change, and change notifications for a single transition.
+func writeGoTransitionBody(b *strings.Builder, t Transition, stateType string) {
+	// Action.
+	if t.Do != "" {
+		fmt.Fprintf(b, "\t\tif fn := m.Actions[Action%s]; fn != nil {\n", goCamel(string(t.Do)))
+		b.WriteString("\t\t\tif err := fn(); err != nil { return false, err }\n")
+		b.WriteString("\t\t}\n")
+	}
+
+	// Variable updates — emit simple assignments directly.
+	for _, u := range t.Updates {
+		field := goCamel(u.Var)
+		if lit, ok := goSimpleLiteral(u.Expr); ok {
+			fmt.Fprintf(b, "\t\tm.%s = %s\n", field, lit)
+			fmt.Fprintf(b, "\t\tif m.OnChange != nil { m.OnChange(%q) }\n", u.Var)
+		} else {
+			// Complex expression — must be handled by the action callback.
+			fmt.Fprintf(b, "\t\t// %s: %s (set by action)\n", u.Var, u.Expr)
+		}
+	}
+
+	// State transition.
+	fmt.Fprintf(b, "\t\tm.State = %s%s\n", stateType, goCamel(string(t.To)))
+}
+
+// goSimpleLiteral converts a TLA+ expression to a Go literal if it's
+// simple enough (string, int, bool). Returns ("", false) for complex
+// expressions that need action callbacks.
+func goSimpleLiteral(expr string) (string, bool) {
+	expr = strings.TrimSpace(expr)
+	switch expr {
+	case "TRUE":
+		return "true", true
+	case "FALSE":
+		return "false", true
+	}
+	if strings.HasPrefix(expr, "\"") && strings.HasSuffix(expr, "\"") {
+		return expr, true // already a Go string literal
+	}
+	// Simple integer.
+	var n int
+	if _, err := fmt.Sscanf(expr, "%d", &n); err == nil {
+		return fmt.Sprintf("%d", n), true
+	}
+	return "", false
+}
+
+// goInitialValue converts a VarDef's TLA+ initial value to a Go literal,
+// or returns "" if it can't be simply expressed.
+func goInitialValue(v VarDef) string {
+	if lit, ok := goSimpleLiteral(v.Initial); ok {
+		return lit
+	}
+	// Default zero values for types.
+	switch v.Type {
+	case VarInt:
+		return "0"
+	case VarBool:
+		return "false"
+	case VarSetString:
+		return "" // zero value of frozen.Set[string] is empty set
+	default:
+		return `""`
+	}
+}
+
 func goType(t VarType) string {
 	switch t {
 	case VarInt:
@@ -270,24 +362,6 @@ func goType(t VarType) string {
 	}
 }
 
-// goVarCast generates a type assertion expression for reading from a map[string]any named "m".
-func goVarCast(varName string, t VarType) string {
-	key := fmt.Sprintf("m[%q]", varName)
-	// The map parameter in generated functions is always named "m".
-	switch t {
-	case VarInt:
-		return key + ".(int)"
-	case VarBool:
-		return key + ".(bool)"
-	case VarSetString:
-		return key + ".(frozen.Set[string])"
-	default:
-		return key + ".(string)"
-	}
-}
-
-// goConstPrefix maps actor names to Go constant prefixes.
-// "server" -> "Server", "ios" -> "App", "cli" -> "CLI"
 func goConstPrefix(actor string) string {
 	switch actor {
 	case "ios":
@@ -302,8 +376,6 @@ func goConstPrefix(actor string) string {
 	}
 }
 
-// goCamel converts a snake_case identifier to GoCamelCase.
-// "pair_begin" -> "PairBegin", "token_valid" -> "TokenValid"
 func goCamel(s string) string {
 	var b strings.Builder
 	upper := true
