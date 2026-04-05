@@ -163,8 +163,12 @@ func newExecutor(
 	}
 
 	// Start relay readers — they run for the lifetime of the connection.
-	go e.streamReader(ctx, relay, EventRelayStreamData, EventRelayStreamError)
-	go e.datagramReader(ctx, relay, EventRelayDatagram)
+	if relay.stream != nil {
+		go e.streamReader(ctx, relay, EventRelayStreamData, EventRelayStreamError)
+	}
+	if relay.dg != nil {
+		go e.datagramReader(ctx, relay, EventRelayDatagram)
+	}
 
 	// Start the event loop.
 	go e.run()
