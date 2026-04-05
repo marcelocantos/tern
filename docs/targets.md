@@ -217,20 +217,6 @@ Produces:
 
 ---
 
-### 🎯T16 Fly.io auto-start for UDP
-
-The Fly.io machine stops when idle and doesn't auto-start for UDP
-traffic. Every test session requires manual `fly machines start`.
-Investigate:
-- Keep-alive mechanism (periodic health ping from a cron job)
-- Fly's `auto_start_machines` with a TCP health check on a separate port
-- Alternative hosting that handles UDP auto-start natively
-
-- **Weight**: 1.7 (value 5 / cost 3)
-- **Status**: done — TCP service on port 443 with auto_start_machines=true.
-  Fly proxy wakes the machine on TCP/HTTPS, then UDP flows to the running
-  machine. WakeRelay() helper for clients.
-
 ---
 
 ### 🎯T18 State machine mediates all Conn behavior
@@ -309,6 +295,13 @@ tests work without manual machine management.
 ---
 
 ## Achieved
+
+### 🎯T16 Fly.io auto-start for UDP
+
+- **Weight**: 1 (value 1 / cost 1)
+- **Status**: done — TCP service on port 443 with auto_start_machines=true.
+  Fly proxy wakes the machine on TCP/HTTPS, then UDP flows to the running
+  machine. WakeRelay() helper for clients.
 
 ### 🎯T3 Fly.io deployment via CI
 
