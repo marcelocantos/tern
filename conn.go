@@ -116,7 +116,14 @@ func newConn(stream io.ReadWriteCloser, dg datagrammer, closer io.Closer, opener
 		m.Guards[GuardAtMaxFailures] = func() bool { return m.PingFailures+1 >= 3 }
 		m.Actions[ActionActivateLan] = func() error { return nil }
 		m.Actions[ActionResetFailures] = func() error { return nil }
-		m.Actions[ActionFallbackToRelay] = func() error { return nil }
+		m.Actions[ActionFallbackToRelay] = func() error {
+			// Increment backoff (complex expr not handled by codegen).
+			m.BackoffLevel++
+			if m.BackoffLevel > 5 {
+				m.BackoffLevel = 5
+			}
+			return nil
+		}
 		machine = m
 	case roleClient:
 		m := NewClientMachine()

@@ -608,6 +608,7 @@ func (e *executor) streamReader(ctx context.Context, p *path, dataEvent, errorEv
 				return
 			}
 			if len(plaintext) == 0 {
+				e.submit(event{id: dataEvent, payload: &streamData{data: nil}})
 				continue
 			}
 			// Demux control messages vs application data.
