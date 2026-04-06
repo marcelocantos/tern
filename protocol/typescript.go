@@ -10,10 +10,10 @@ import (
 )
 
 // ExportTypeScript writes a TypeScript source file with:
-//   - Const enums for states (per actor) and message types
-//   - Guard and action ID constants
-//   - EventID and CmdID enums
-//   - Transition table as static data
+//   - Per-actor state enums at module scope (collision-free, actor-prefixed)
+//   - A <ProtoName>Protocol namespace containing: MessageType, GuardID,
+//     ActionID, EventID, CmdID, Wire constants, Transition/ActorTable
+//     interfaces, and per-actor transition tables
 //   - Per-actor typed machine classes with handleEvent methods
 func (p *Protocol) ExportTypeScript(w io.Writer) error {
 	var b strings.Builder
@@ -23,14 +23,11 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 	b.WriteString("// Auto-generated from protocol definition. Do not edit.\n")
 	b.WriteString("// Source of truth: protocol/*.yaml\n\n")
 
-	// Message type enum.
-	b.WriteString("export enum MessageType {\n")
-	for _, m := range p.Messages {
-		fmt.Fprintf(&b, "    %s = \"%s\",\n", kotlinPascalCase(string(m.Type)), m.Type)
-	}
-	b.WriteString("}\n\n")
+	protoName := tsTypeName(p.Name)
+	nsName := protoName + "Protocol"
 
-	// Per-actor state enum.
+	// Per-actor state enums at module scope (names are already unique because
+	// they are prefixed with the actor name, e.g. ServerState, IosState).
 	for _, a := range p.Actors {
 		typeName := tsTypeName(a.Name)
 		states := collectStates(a)
@@ -42,87 +39,101 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 		b.WriteString("}\n\n")
 	}
 
-	// Guard ID enum.
+	// Protocol namespace — contains shared enums and transition tables.
+	// Using a namespace prevents name collisions when multiple protocol files
+	// are imported into the same module (e.g. PairingCeremonyMachine.ts and
+	// SessionMachine.ts both define MessageType, GuardID, etc.).
+	b.WriteString("/** The protocol transition table and shared type enums. */\n")
+	fmt.Fprintf(&b, "export namespace %s {\n\n", nsName)
+
+	// Message type enum (nested).
+	b.WriteString("    export enum MessageType {\n")
+	for _, m := range p.Messages {
+		fmt.Fprintf(&b, "        %s = \"%s\",\n", kotlinPascalCase(string(m.Type)), m.Type)
+	}
+	b.WriteString("    }\n\n")
+
+	// Guard ID enum (nested).
 	if len(p.Guards) > 0 {
-		b.WriteString("export enum GuardID {\n")
+		b.WriteString("    export enum GuardID {\n")
 		for _, g := range p.Guards {
-			fmt.Fprintf(&b, "    %s = \"%s\",\n", kotlinPascalCase(string(g.ID)), g.ID)
+			fmt.Fprintf(&b, "        %s = \"%s\",\n", kotlinPascalCase(string(g.ID)), g.ID)
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// Action ID enum.
+	// Action ID enum (nested).
 	actions := collectActions(p)
 	if len(actions) > 0 {
-		b.WriteString("export enum ActionID {\n")
+		b.WriteString("    export enum ActionID {\n")
 		for _, id := range actions {
-			fmt.Fprintf(&b, "    %s = \"%s\",\n", kotlinPascalCase(id), id)
+			fmt.Fprintf(&b, "        %s = \"%s\",\n", kotlinPascalCase(id), id)
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// EventID enum — internal events + recv_* events for messages.
+	// EventID enum (nested) — internal events + recv_* events for messages.
 	events := tsCollectEvents(p)
 	if len(events) > 0 {
-		b.WriteString("export enum EventID {\n")
+		b.WriteString("    export enum EventID {\n")
 		for _, id := range events {
-			fmt.Fprintf(&b, "    %s = \"%s\",\n", kotlinPascalCase(id), id)
+			fmt.Fprintf(&b, "        %s = \"%s\",\n", kotlinPascalCase(id), id)
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// CmdID enum.
+	// CmdID enum (nested).
 	if len(p.Commands) > 0 {
-		b.WriteString("export enum CmdID {\n")
+		b.WriteString("    export enum CmdID {\n")
 		for _, c := range p.Commands {
-			fmt.Fprintf(&b, "    %s = \"%s\",\n", kotlinPascalCase(string(c.ID)), c.ID)
+			fmt.Fprintf(&b, "        %s = \"%s\",\n", kotlinPascalCase(string(c.ID)), c.ID)
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// Wire constants.
+	// Wire constants (nested).
 	if len(p.WireConsts) > 0 {
-		b.WriteString("/** Protocol wire constants shared across all platforms. */\n")
-		b.WriteString("export const Wire = {\n")
+		b.WriteString("    /** Protocol wire constants shared across all platforms. */\n")
+		b.WriteString("    export const Wire = {\n")
 		for _, wc := range p.WireConsts {
 			name := tsConstName(wc.Name)
 			switch wc.Type {
 			case "byte":
-				fmt.Fprintf(&b, "    %s: 0x%02X,\n", name, wireInt(wc.Value))
+				fmt.Fprintf(&b, "        %s: 0x%02X,\n", name, wireInt(wc.Value))
 			case "int":
-				fmt.Fprintf(&b, "    %s: %d,\n", name, wireInt(wc.Value))
+				fmt.Fprintf(&b, "        %s: %d,\n", name, wireInt(wc.Value))
 			case "duration_ms":
-				fmt.Fprintf(&b, "    %s: %d, // ms\n", name, wireInt(wc.Value))
+				fmt.Fprintf(&b, "        %s: %d, // ms\n", name, wireInt(wc.Value))
 			case "string":
-				fmt.Fprintf(&b, "    %s: %q,\n", name, wc.Value)
+				fmt.Fprintf(&b, "        %s: %q,\n", name, wc.Value)
 			}
 		}
-		b.WriteString("} as const;\n\n")
+		b.WriteString("    } as const;\n\n")
 	}
 
-	// Transition table interface.
-	b.WriteString("export interface Transition {\n")
-	b.WriteString("    readonly from: string;\n")
-	b.WriteString("    readonly to: string;\n")
-	b.WriteString("    readonly on: string;\n")
-	b.WriteString("    readonly onKind: \"recv\" | \"internal\";\n")
-	b.WriteString("    readonly guard?: string;\n")
-	b.WriteString("    readonly action?: string;\n")
-	b.WriteString("    readonly sends?: ReadonlyArray<{ readonly to: string; readonly msg: string }>;\n")
-	b.WriteString("}\n\n")
+	// Transition table interfaces (nested).
+	b.WriteString("    export interface Transition {\n")
+	b.WriteString("        readonly from: string;\n")
+	b.WriteString("        readonly to: string;\n")
+	b.WriteString("        readonly on: string;\n")
+	b.WriteString("        readonly onKind: \"recv\" | \"internal\";\n")
+	b.WriteString("        readonly guard?: string;\n")
+	b.WriteString("        readonly action?: string;\n")
+	b.WriteString("        readonly sends?: ReadonlyArray<{ readonly to: string; readonly msg: string }>;\n")
+	b.WriteString("    }\n\n")
 
-	b.WriteString("export interface ActorTable {\n")
-	b.WriteString("    readonly initial: string;\n")
-	b.WriteString("    readonly transitions: ReadonlyArray<Transition>;\n")
-	b.WriteString("}\n\n")
+	b.WriteString("    export interface ActorTable {\n")
+	b.WriteString("        readonly initial: string;\n")
+	b.WriteString("        readonly transitions: ReadonlyArray<Transition>;\n")
+	b.WriteString("    }\n\n")
 
-	// Per-actor table.
+	// Per-actor transition tables (nested).
 	for _, a := range p.Actors {
 		typeName := tsTypeName(a.Name)
-		fmt.Fprintf(&b, "/** %s transition table. */\n", a.Name)
-		fmt.Fprintf(&b, "export const %sTable: ActorTable = {\n", strings.ToLower(typeName[:1])+typeName[1:])
-		fmt.Fprintf(&b, "    initial: %sState.%s,\n", typeName, a.Initial)
-		b.WriteString("    transitions: [\n")
+		fmt.Fprintf(&b, "    /** %s transition table. */\n", a.Name)
+		fmt.Fprintf(&b, "    export const %sTable: ActorTable = {\n", strings.ToLower(typeName[:1])+typeName[1:])
+		fmt.Fprintf(&b, "        initial: %sState.%s,\n", typeName, a.Initial)
+		b.WriteString("        transitions: [\n")
 
 		for _, t := range a.FlattenedTransitions() {
 			onKind := "internal"
@@ -132,7 +143,7 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 				onValue = string(t.On.Msg)
 			}
 
-			b.WriteString("        { ")
+			b.WriteString("            { ")
 			fmt.Fprintf(&b, "from: %q, to: %q, on: %q, onKind: %q", t.From, t.To, onValue, onKind)
 			if t.Guard != "" {
 				fmt.Fprintf(&b, ", guard: %q", string(t.Guard))
@@ -153,9 +164,12 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 			b.WriteString(" },\n")
 		}
 
-		b.WriteString("    ],\n")
-		b.WriteString("};\n\n")
+		b.WriteString("        ],\n")
+		b.WriteString("    };\n\n")
 	}
+
+	// Close namespace.
+	b.WriteString("}\n\n")
 
 	// Per-actor typed machine classes.
 	for _, a := range p.Actors {
@@ -172,6 +186,8 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 		// Machine class.
 		fmt.Fprintf(&b, "/** %sMachine is the generated state machine for the %s actor. */\n", typeName, a.Name)
 		fmt.Fprintf(&b, "export class %sMachine {\n", typeName)
+		// Convenience type aliases so callers can write machine.EventID etc.
+		fmt.Fprintf(&b, "    readonly protocol = %s;\n", nsName)
 		fmt.Fprintf(&b, "    state: %sState;\n", typeName)
 
 		// Typed variable fields owned by this actor.
@@ -189,10 +205,10 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 		}
 
 		if len(p.Guards) > 0 {
-			b.WriteString("    guards: Map<GuardID, () => boolean> = new Map();\n")
+			fmt.Fprintf(&b, "    guards: Map<%s.GuardID, () => boolean> = new Map();\n", nsName)
 		}
 		if len(actions) > 0 {
-			b.WriteString("    actions: Map<ActionID, () => void> = new Map();\n")
+			fmt.Fprintf(&b, "    actions: Map<%s.ActionID, () => void> = new Map();\n", nsName)
 		}
 		b.WriteString("\n")
 
@@ -202,7 +218,7 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 		b.WriteString("    }\n\n")
 
 		// handleEvent method.
-		b.WriteString("    handleEvent(ev: EventID): CmdID[] {\n")
+		fmt.Fprintf(&b, "    handleEvent(ev: %s.EventID): %s.CmdID[] {\n", nsName, nsName)
 		b.WriteString("        switch (true) {\n")
 
 		for _, t := range a.FlattenedTransitions() {
@@ -219,16 +235,16 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 			guardCond := ""
 			if t.Guard != "" {
 				guardVal := kotlinPascalCase(string(t.Guard))
-				guardCond = fmt.Sprintf(" && this.guards.get(GuardID.%s)?.() === true", guardVal)
+				guardCond = fmt.Sprintf(" && this.guards.get(%s.GuardID.%s)?.() === true", nsName, guardVal)
 			}
 
-			fmt.Fprintf(&b, "            case this.state === %sState.%s && ev === EventID.%s%s: {\n",
-				typeName, t.From, eventVal, guardCond)
+			fmt.Fprintf(&b, "            case this.state === %sState.%s && ev === %s.EventID.%s%s: {\n",
+				typeName, t.From, nsName, eventVal, guardCond)
 
 			// Action call.
 			if t.Do != "" {
 				actionVal := kotlinPascalCase(string(t.Do))
-				fmt.Fprintf(&b, "                this.actions.get(ActionID.%s)?.();\n", actionVal)
+				fmt.Fprintf(&b, "                this.actions.get(%s.ActionID.%s)?.();\n", nsName, actionVal)
 			}
 
 			// Variable updates.
@@ -251,7 +267,7 @@ func (p *Protocol) ExportTypeScript(w io.Writer) error {
 					if i > 0 {
 						b.WriteString(", ")
 					}
-					fmt.Fprintf(&b, "CmdID.%s", kotlinPascalCase(string(cmd)))
+					fmt.Fprintf(&b, "%s.CmdID.%s", nsName, kotlinPascalCase(string(cmd)))
 				}
 				b.WriteString("];\n")
 			} else {
