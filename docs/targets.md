@@ -34,17 +34,6 @@ of transport.
 
 - **Weight**: 0.8 (value 5 / cost 6)
 
-#### 🎯T5.1 Reorder-tolerant decryption
-
-`Channel.Decrypt` accepts out-of-order sequence numbers on lossy
-transports. `ModeDatagrams` allows gaps (forward jumps) while
-rejecting replays. Required for safe transport cutover.
-
-- **Weight**: 1.7 (value 5 / cost 3)
-- **Status**: achieved — `ModeDatagrams` in `crypto/crypto.go` accepts
-  gaps and rejects replays. `NewDatagramChannel` convenience constructor.
-  Full test coverage including reorder, replay, and 50% packet loss.
-
 #### 🎯T5.2 LAN discovery via relay
 
 After the encrypted channel is established, both sides exchange their
@@ -219,50 +208,6 @@ Produces:
 
 ---
 
-### 🎯T19 Hierarchical state machines in protocol framework
-
-The transport machine has ~25 identical data-forwarding self-loops
-per actor because every path state must replicate them. Adding a new
-path state (e.g., STUNConnecting for 🎯T6) requires adding 5+ more
-copies. The root cause is a flat state machine with no inheritance.
-
-**Desired state**: The YAML protocol framework supports hierarchical
-states (Harel statecharts / UML nested states). A superstate defines
-transitions inherited by all substates. The transport machine uses a
-`Connected` superstate containing all path states, with
-data-forwarding transitions defined once on `Connected`.
-
-**Scope**:
-- YAML gains nested `states:` with `children:` and `transitions:` at
-  each level; substates inherit parent transitions
-- Data model (`protocol.go`): states become a tree; `Actor` carries
-  the hierarchy
-- Runtime (`machine.go`): `HandleEvent` walks up the state hierarchy
-  to find matching transitions (innermost wins)
-- Go generator (`gogen.go`): emit hierarchical dispatch
-- Swift generator (`swift.go`): same
-- TLA+ generator (`tla.go`): flatten hierarchy for model checking
-  (expand inherited transitions into substates)
-- PlantUML generator (`plantuml.go`): emit nested `state` blocks
-- Kotlin generator: same as Swift
-- Transport YAML refactored to use hierarchy — self-loops eliminated
-- Entry/exit actions on superstates (stretch — implement if natural)
-
-**Out of scope (for now)**: Parallel regions (AND-states), history
-states. These can be layered on later.
-
-**Forked from**: diagram review during 🎯T18 completion — the
-coalesced self-loops made the redundancy visually obvious.
-
-- **Weight**: 1.25 (value 5 / cost 4)
-- **Status**: achieved — `StateNode` hierarchy in `protocol.go`,
-  `states:` section in YAML parser, `FlattenedTransitions()` expansion,
-  all generators updated, session.yaml refactored (~50 self-loops
-  eliminated via Connected/LANPath superstates). PlantUML nested
-  rendering deferred as cosmetic follow-up.
-
----
-
 ### 🎯T17 Makefile deploy target
 
 `make deploy` that deploys to Fly.io, starts the machine, and waits
@@ -275,6 +220,22 @@ tests work without manual machine management.
 ---
 
 ## Achieved
+
+### 🎯T19 Hierarchical state machines in protocol framework
+
+- **Weight**: 1 (value 1 / cost 1)
+- **Status**: done — `StateNode` hierarchy in `protocol.go`,
+  `states:` section in YAML parser, `FlattenedTransitions()` expansion,
+  all generators updated, session.yaml refactored (~50 self-loops
+  eliminated via Connected/LANPath superstates). PlantUML nested
+  rendering deferred as cosmetic follow-up.
+
+### 🎯T5.1 Reorder-tolerant decryption
+
+- **Weight**: 1 (value 1 / cost 1)
+- **Status**: done — `ModeDatagrams` in `crypto/crypto.go` accepts
+  gaps and rejects replays. `NewDatagramChannel` convenience constructor.
+  Full test coverage including reorder, replay, and 50% packet loss.
 
 ### 🎯T16 Fly.io auto-start for UDP
 
