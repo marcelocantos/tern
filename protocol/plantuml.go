@@ -334,7 +334,16 @@ func emitNode(b *strings.Builder, node *StateNode, alias string, phaseStates map
 	sid := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(node.Name)))
 	fmt.Fprintf(b, "%sstate \"%s\" as %s {\n", indent, string(node.Name), sid)
 
-	// Recurse into children.
+	// Declare leaf children inside the container so PlantUML
+	// places them visually within the superstate boundary.
+	for _, child := range node.Children {
+		if child.IsLeaf() && phaseStates[child.Name] {
+			cid := fmt.Sprintf("%s_%s", alias, sanitisePUML(string(child.Name)))
+			fmt.Fprintf(b, "%s  state \"%s\" as %s\n", indent, string(child.Name), cid)
+		}
+	}
+
+	// Recurse into non-leaf children.
 	for _, child := range node.Children {
 		emitNode(b, child, alias, phaseStates, indent+"  ")
 	}
