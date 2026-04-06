@@ -27,9 +27,9 @@ func (p *Protocol) ExportPlantUMLActors(w io.Writer, titleSuffix string, actors 
 	}
 	var b strings.Builder
 
-	diagramName := sanitisePUML(p.Name)
-	if titleSuffix != "" {
-		diagramName += "_" + sanitisePUML(titleSuffix)
+	diagramName := strings.ToLower(sanitisePUML(titleSuffix))
+	if diagramName == "" {
+		diagramName = strings.ToLower(sanitisePUML(p.Name))
 	}
 	b.WriteString("@startuml ")
 	b.WriteString(diagramName)
@@ -71,7 +71,9 @@ func (p *Protocol) ExportPlantUMLActors(w io.Writer, titleSuffix string, actors 
 	actorAlias := make(map[string]string)
 
 	for i, a := range p.Actors {
-		if !includeActor(a.Name) || !hasInteraction[a.Name] {
+		// When no explicit actor list is given, skip actors that have
+		// no cross-actor interactions (infrastructure-only actors).
+		if !includeActor(a.Name) || (len(actorSet) == 0 && !hasInteraction[a.Name]) {
 			continue
 		}
 		alias := aliases[i%len(aliases)]
