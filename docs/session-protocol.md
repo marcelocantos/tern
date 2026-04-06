@@ -36,8 +36,10 @@ Three actors participate across both phases:
 
 ![Transport State Machine](transport.svg)
 
-App I/O transitions (`app_send`, `relay_stream_data`, etc.) are
-self-loops on transport states. Commands emitted by transitions
+Superstates (`Connected`, `LANPath`/`LANDataPath`) are rendered as
+containers. App I/O transitions inherited from superstates appear as
+self-loops on the container boundary — see
+[State Hierarchy](#state-hierarchy). Commands emitted by transitions
 drive the executor.
 
 ### Relay
@@ -81,6 +83,13 @@ Message receipts (`recv lan_offer`, `recv path_ping`, etc.) are also
 events — the stream reader detects the message type and posts the
 corresponding event.
 
+`app_force_fallback` is a special application event: the caller
+requests immediate fallback to relay regardless of current LAN state.
+The machine has transitions from every LAN-related state, each emitting
+the correct cleanup commands. This replaced an ad-hoc `fallbackToRelay()`
+function that type-asserted the machine and manipulated variables
+directly.
+
 ### Commands
 
 Declared in the `commands:` section of session.yaml. The `emits:`
@@ -89,8 +98,9 @@ field on each transition lists the commands it produces. Categories:
 | Category | Examples |
 |---|---|
 | **I/O writes** | `write_active_stream`, `send_active_datagram`, `send_path_ping` |
-| **App delivery** | `deliver_recv`, `deliver_recv_datagram` |
+| **App delivery** | `deliver_recv`, `deliver_recv_datagram`, `deliver_recv_error` |
 | **Resource lifecycle** | `start_lan_stream_reader`, `stop_monitor`, `close_lan_path` |
+| **Timers** | `start_backoff_timer`, `start_pong_timeout`, `cancel_pong_timeout` |
 | **LAN lifecycle** | `send_lan_offer`, `dial_lan`, `send_lan_verify` |
 | **Notifications** | `signal_lan_ready`, `reset_lan_ready` |
 | **Crypto** | `set_crypto_datagram` |
@@ -108,6 +118,12 @@ I/O resources, and app response channels. Its `run()` loop:
 I/O reader goroutines (relay stream, relay datagram, LAN stream,
 LAN datagram) post events — they contain zero state logic. App
 methods (`Send`, `Recv`) submit events and block on response channels.
+
+If the machine has no transition for an event in the current state,
+the event is logged and dropped. There is no fallback handler — the
+machine controls all data delivery. This guarantees cross-language
+behavioral consistency: if the machine doesn't handle it, it doesn't
+happen.
 
 ### Boundaries
 
@@ -167,7 +183,71 @@ After pairing, the transport phase manages which network path carries
 traffic. The relay is always connected as a fallback; LAN provides a
 direct low-latency path when both devices are on the same network.
 
-### Flow
+The transport submachine is organised as a hierarchy of superstates.
+A superstate groups leaf states and defines transitions that all its
+children inherit. At generation time, `FlattenedTransitions()` expands
+every inherited transition onto each leaf state. Generators, TLA+, and
+the runtime all consume the flattened table — the hierarchy is a YAML
+authoring convenience, not a runtime concept.
+
+### State Hierarchy
+
+```
+backend:
+  Connected                        # superstate — all path states
+  ├─ RelayConnected
+  ├─ LANOffered
+  ├─ LANPath                       # sub-superstate — LAN-active states
+  │   ├─ LANActive
+  │   └─ LANDegraded
+  └─ RelayBackoff
+
+client:
+  Connected
+  ├─ RelayConnected
+  ├─ LANConnecting
+  ├─ LANVerifying
+  ├─ LANDataPath                   # sub-superstate
+  │   └─ LANActive
+  └─ RelayBackoff
+```
+
+### Connected (superstate)
+
+All leaf states under `Connected` inherit these data-forwarding
+transitions — defined once on the superstate, not replicated per leaf:
+
+```yaml
+Connected:
+  children: [RelayConnected, LANOffered, LANPath, RelayBackoff]
+  transitions:
+    - {on: app_send, emits: [write_active_stream]}
+    - {on: relay_stream_data, emits: [deliver_recv]}
+    - {on: relay_stream_error, emits: [deliver_recv_error]}
+    - {on: app_send_datagram, emits: [send_active_datagram]}
+    - {on: relay_datagram, emits: [deliver_recv_datagram]}
+```
+
+This means every transport state can send and receive data — the app
+never needs to know which path is active. The relay always delivers
+(it carries control messages even when LAN is active).
+
+### LANPath / LANDataPath (sub-superstates)
+
+States where LAN is usable additionally inherit LAN-specific I/O:
+
+```yaml
+LANPath:
+  children: [LANActive, LANDegraded]
+  transitions:
+    - {on: lan_stream_data, emits: [deliver_recv]}
+    - {on: lan_datagram, emits: [deliver_recv_datagram]}
+```
+
+`LANActive` and `LANDegraded` thus handle both relay and LAN data —
+inherited from two levels of the hierarchy.
+
+### LAN Establishment Flow
 
 1. Backend starts a LAN server and sends `lan_offer` via relay
    (includes LAN address + random challenge)
@@ -175,18 +255,9 @@ direct low-latency path when both devices are on the same network.
 3. Client sends `lan_verify` with the challenge echoed back
 4. Backend verifies challenge, sends `lan_confirm`
 5. Both sides switch to the LAN path
-6. Health monitor pings the LAN path at fixed intervals
-7. If pings fail (3 consecutive), fall back to relay
-8. After fallback, wait with exponential backoff, then re-advertise
-9. If LAN becomes available again, re-establish
 
-### Resource Lifecycle via Commands
-
-Resource management is not inferred from variable diffs. Each
-transition explicitly declares the commands it emits. The executor
-mechanically executes them.
-
-Example: `LANOffered → LANActive` (on `recv lan_verify`):
+The activation transition (`LANOffered → LANActive`) explicitly emits
+the commands that bring up LAN resources:
 
 ```yaml
 emits:
@@ -198,10 +269,16 @@ emits:
   - set_crypto_datagram
 ```
 
-Example: `LANDegraded → RelayBackoff` (on `ping_timeout`, guard
-`at_max_failures`):
+### Health Monitor
+
+Once LAN is active, the health monitor sends `dgPing` datagrams at
+fixed intervals. Each ping emits `start_pong_timeout`; a `dgPong`
+reply emits `cancel_pong_timeout`. If the pong timeout fires,
+`ping_timeout` triggers degradation (`LANActive → LANDegraded`).
+After 3 consecutive failures, fallback:
 
 ```yaml
+# LANDegraded → RelayBackoff (guard: at_max_failures)
 emits:
   - stop_monitor
   - stop_lan_stream_reader
@@ -215,26 +292,12 @@ Every resource start has a corresponding stop. The machine's
 transition table is the single source of truth for when resources
 are created and destroyed.
 
-### App I/O Transitions
+### Force Fallback
 
-Application Send/Recv are self-loop transitions on every transport
-state. The machine routes them to the active path:
-
-```yaml
-- from: LANActive
-  to: LANActive
-  on: app_send
-  emits: [write_active_stream]
-
-- from: LANActive
-  to: LANActive
-  on: lan_stream_data
-  emits: [deliver_recv]
-```
-
-When on relay, `relay_stream_data` delivers. When on LAN, both
-`relay_stream_data` and `lan_stream_data` deliver (relay carries
-control messages even when LAN is active).
+`app_force_fallback` is defined on every LAN-related leaf state,
+each emitting the correct cleanup commands for that state. This
+replaced ad-hoc code that type-asserted the machine and manipulated
+variables directly. One `submitSync(EventAppForceFallback)` call.
 
 ### Backoff Strategy
 
@@ -296,12 +359,34 @@ The YAML spec is the single source of truth. `protogen` generates:
 | **Kotlin** | State/message enum constants. Typed machines TBD. |
 | **TypeScript** | State/message enum constants. Typed machines TBD. |
 | **TLA+** | Pure TLA+ spec (named actions, UNCHANGED, no PlusCal). Phase-aware export. |
-| **PlantUML** | Hierarchical state diagram with phase superstates. |
+| **PlantUML** | Separate transport + relay diagrams. Arrow coalescing for shared qualifiers. |
 
 The Go generator emits `HandleEvent` — a unified entry point that
 maps `(state, event, guards) → (new state, variable updates, commands)`.
 This replaces the earlier `HandleMessage`/`Step` split. The other
 language generators will follow the same pattern.
+
+All generators consume `FlattenedTransitions()` — the hierarchy is
+resolved once during YAML parsing and generators see only leaf-state
+transitions.
+
+## Wire Constants
+
+Protocol constants (datagram frame types, fragment sizes, health
+thresholds, message framing, channel key derivation strings) are
+declared in the `wire_constants:` section of session.yaml and
+generated into all target languages:
+
+| Language | Output |
+|---|---|
+| **Go** | `const` block with typed constants (`byte`, `int`, `duration_ms`, `string`) |
+| **Swift** | `SessionWire` enum with static lets |
+| **Kotlin** | `Wire` object with `const val`s |
+| **TypeScript** | `Wire` const object |
+
+This replaced hand-written constants that were duplicated across
+languages. A frame type or timing change now requires editing one
+YAML line.
 
 ## TLA+ Verification
 
@@ -569,14 +654,75 @@ messages) and `Step` (for internal events). All inputs are events:
 
 One method, one switch, one event space.
 
-### The Final State
+### Closing the Gaps: Full Machine Mediation (🎯T18)
+
+With the executor and command emission in place, several gaps remained
+where ad-hoc Go code made decisions outside the machine.
+
+**Pong timeout lifecycle.** The executor inferred "start timer" from
+`CmdSendPathPing` and "cancel timer" from `EventRecvPathPong`. This
+was the same OnChange pattern in miniature — the executor guessed
+what timer operations to perform. The fix: the machine explicitly
+emits `start_pong_timeout` alongside `send_path_ping`, and
+`cancel_pong_timeout` on pong receipt. The executor no longer
+inspects event IDs to decide timer lifecycle.
+
+**Force fallback.** `fallbackToRelay()` type-asserted the machine,
+read its state, and manipulated `PingFailures` directly. Replaced
+with `app_force_fallback` — a machine event with transitions from
+every LAN-related state, each emitting the correct cleanup commands.
+One `submitSync(EventAppForceFallback)` call.
+
+**Unmatched event handler.** The executor's `handleUnmatchedEvent`
+silently delivered data and errors regardless of machine state,
+masking missing transitions. Deleted. All data and error events now
+have machine transitions in every reachable transport state. If the
+machine has no transition, the event is logged and dropped.
+
+**DatagramChannel migration.** `DatagramChannel.Recv()` and `Send()`
+went through legacy `Conn`-level dispatch with its own mutex,
+dispatcher goroutine, and reassembler. Migrated to the executor's
+event loop with per-channel datagram buffers. Removed ~200 lines of
+ad-hoc dispatch code from `Conn`.
+
+**Wire constants.** Protocol constants (frame types, fragment sizes,
+health thresholds) were hardcoded in Go and hand-duplicated per
+language. Moved to `wire_constants:` in session.yaml, generated into
+Go/Swift/Kotlin/TypeScript. One YAML line per constant.
+
+After these changes, the executor contains zero state logic. Every
+decision flows through the machine.
+
+### Hierarchical State Machines (🎯T19)
+
+The transport machine's flat transition table had a scaling problem:
+every path state needed identical self-loop transitions for data
+forwarding (`app_send`, `relay_stream_data`, `relay_datagram`, etc.).
+Five events × five leaf states = 25 transitions per actor, all
+identical. Adding a new event or state required updating every
+combination.
+
+The solution: **hierarchical superstates.** The Transport section
+above describes the result — `Connected` holds data-forwarding
+events inherited by all path states; `LANPath`/`LANDataPath` adds
+LAN-specific I/O for LAN-capable leaves. ~50 duplicated transitions
+eliminated.
+
+The framework implementation: `StateNode` with `Parent`/`Children`/
+`Transitions` fields, `FlattenedTransitions()` to expand the
+hierarchy, and all generators consuming the flattened table — the
+hierarchy is invisible below the YAML layer.
+
+### The Current State
 
 | Layer | Formalism | Status |
 |---|---|---|
 | YAML spec | Single source of truth | `session.yaml` |
-| Events | Declared in `events:` section | App surface + I/O surface |
-| Commands | Declared in `commands:` section | I/O writes, resource lifecycle, notifications |
+| Hierarchy | Superstates with inherited transitions | `Connected`, `LANPath`/`LANDataPath` |
+| Events | Declared in `events:` section | App surface + I/O surface + force fallback |
+| Commands | Declared in `commands:` section | I/O writes, timers, resource lifecycle, notifications |
 | Emits | Per-transition command lists | Every transition declares its commands |
+| Wire constants | Declared in `wire_constants:` section | Frame types, sizes, thresholds — generated per language |
 | Phases | Named groupings with scoped vars | Pairing (21 states, 24 vars), Transport (8 states, 16 vars) |
 | Types | `string`, `int`, `bool`, `set<string>` | All 40 variables typed |
 | Structs | Named variable groups | 4 structs (ECDH, Token, BackendPath, ClientPath) |
@@ -586,17 +732,19 @@ One method, one switch, one event space.
 | TLA+ generation | Pure TLA+, channel-free | 121 states, <1s |
 | Go code generation | `HandleEvent` + typed machines | Event/command/state constants |
 | Other languages | Enum constants (machines TBD) | Swift, Kotlin, TypeScript |
-| Executor | Thin event loop in `executor.go` | Conn delegates all I/O |
-| PlantUML | Hierarchical state diagram | Phase superstates |
+| Executor | Thin event loop in `executor.go` | Conn delegates all I/O, zero state logic |
+| PlantUML | Separate transport + relay diagrams | Arrow coalescing, hierarchy rendering |
 
 The progression: hand-written code → hand-written TLA+ →
 generated PlusCal (failed) → generated pure TLA+ (slow) → generated
 pure TLA+ with channel elimination (fast) → OnChange callbacks
-(wrong abstraction) → **explicit command emission (correct).**
+(wrong abstraction) → explicit command emission → close ad-hoc gaps
+(🎯T18) → **hierarchical superstates (🎯T19).**
 
-Each step moved more logic into the state machine. The final step —
-commands — moved the last category of ad-hoc logic (resource
-lifecycle) into the machine. The executor is now a mechanical
-applier of machine instructions. The bugs that prompted this journey
-are impossible by construction: the machine's transition table is the
-single source of truth for what happens, when, and in what order.
+Each step moved more logic into the state machine and removed more
+ad-hoc code from the executor. The executor now contains zero state
+logic — it mechanically executes commands returned by the machine.
+The hierarchy was the last structural improvement: it made the
+transition table scale without duplication. The bugs that prompted
+this journey are impossible by construction, and the YAML is
+maintainable at scale.

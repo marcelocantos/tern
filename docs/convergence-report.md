@@ -4,24 +4,29 @@ Evaluated: 2026-04-06
 
 ## Standing invariants
 
-- **Tests**: PASSING (test job succeeded on CI run #24001562484)
-- **CI**: FAILING — Deploy to Fly.io fails. Dockerfile missing `COPY protocol/ protocol/` and `COPY qr/ qr/` — the root package now imports these after T18 work (executor.go imports protocol, lan.go imports qr). Tests pass; only the deploy step is broken.
+- **Tests**: PASSING (CI run #24020825119 succeeded)
+- **CI**: GREEN — all jobs passing on master
 
 ## Movement
 
-- 🎯T18: close -> **achieved** (moved to Achieved section with full status)
-- 🎯T1, 🎯T5.1, 🎯T6, 🎯T17, 🎯T19: (unchanged)
-- All others: (unchanged)
+- 🎯T19: not started -> **achieved** (hierarchical state machines landed in #3)
+- 🎯T5.1: not started -> **achieved** (was already done, now confirmed and moved to Achieved)
+- Standing invariant: FAILING -> **GREEN** (Dockerfile fixed in #2, `COPY protocol/` and `COPY qr/` added)
+- 🎯T1, 🎯T1.8, 🎯T5, 🎯T6, 🎯T7, 🎯T8, 🎯T10, 🎯T14, 🎯T15, 🎯T17: (unchanged)
 
 ## Gap Report
 
 ### 🎯T1.8 Jevon imports tern's packages  [weight: 1.7]
 Gap: not started
-v0.9.0 released. Migration in jevon repo still pending. This is external work in the jevon codebase.
+v0.9.0 released. Migration in jevon repo still pending. This is external work in the jevon codebase — requires tagging tern and updating jevon's imports.
 
-### 🎯T5.1 Reorder-tolerant decryption  [weight: 1.7]
+### 🎯T6 Investigate STUN/NAT hole-punching  [weight: 1.5]
 Gap: not started
-No buffering logic in `Channel.Decrypt`. Needed for safe transport cutover.
+Pure research target. No code or investigation artifacts exist yet.
+
+### 🎯T17 Makefile deploy target  [weight: 1.5]
+Gap: not started
+No Makefile deploy target exists. CI deploy is working now (standing invariant fixed), so this is unblocked infrastructure work.
 
 ### 🎯T1 Tern is a complete library  [weight: 1.7]
 Gap: converging (7/8 sub-targets achieved)
@@ -34,19 +39,6 @@ Gap: converging (7/8 sub-targets achieved)
   [x] 🎯T1.6 Swift package — achieved
   [x] 🎯T1.7 E2E integration test — achieved
   [ ] 🎯T1.8 Jevon imports tern's packages — not started
-
-### 🎯T6 Investigate STUN/NAT hole-punching  [weight: 1.5]  (status only)
-Status: not started
-
-### 🎯T17 Makefile deploy target  [weight: 1.5]  (status only)
-Status: not started
-  Implied: CI deploy broken — Dockerfile needs protocol/ and qr/ directories. Fixing the Dockerfile is a prerequisite for any deploy-related work.
-
-### 🎯T19 Parallel regions in protocol state machine  [weight: 1.25]  (status only)
-Status: not started
-
-### 🎯T7 Investigate Bluetooth as proximity oracle  [weight: 1.0]  (status only)
-Status: not started
 
 ### 🎯T8 WebTransport relay  [weight: 1.0]
 Gap: converging (3/5 sub-targets achieved)
@@ -63,39 +55,38 @@ Status: blocked on Playwright headless Chromium QUIC support
 ### 🎯T15 Gomobile bindings  [weight: 1.0]  (status only)
 Status: not started
 
+### 🎯T7 Investigate Bluetooth as proximity oracle  [weight: 1.0]  (status only)
+Status: not started
+
 ### 🎯T5 Multi-transport with LAN upgrade  [weight: 0.8]
-Gap: not started (0/4 sub-targets achieved)
-All sub-targets blocked or not started.
+Gap: converging (1/4 sub-targets achieved)
+
+  [x] 🎯T5.1 Reorder-tolerant decryption — achieved
+  [ ] 🎯T5.2 LAN discovery via relay — not started
+  [ ] 🎯T5.3 Cutover protocol — not started (blocked on 🎯T10)
+  [ ] 🎯T5.4 Transport-agnostic Conn — not started (blocked on 🎯T5.2, 🎯T5.3)
 
 ### 🎯T10 TLA+ model for cutover protocol  [weight: 0.6]  (status only)
-Status: not started. Low effective weight.
+Status: not started. Low effective weight — blocks 🎯T5.3 but expensive relative to value.
 
 ### Blocked targets
 
-- 🎯T5.2 LAN discovery via relay — blocked on 🎯T5.1
-- 🎯T5.3 Cutover protocol — blocked on 🎯T5.1, 🎯T10
+- 🎯T5.3 Cutover protocol — blocked on 🎯T10
 - 🎯T5.4 Transport-agnostic Conn — blocked on 🎯T5.2, 🎯T5.3
 - 🎯T8.5 LAN direct WebTransport — blocked on 🎯T8.4
 
 ## Recommendation
 
-Work on: **Fix Dockerfile (CI deploy broken)**
-Reason: Standing invariant violation takes priority over all explicit targets. The Dockerfile is missing `COPY protocol/ protocol/` and `COPY qr/ qr/`, causing every deploy to fail. This is a 2-line fix that restores CI to green. After that, the highest-leverage unblocked targets are 🎯T1.8 and 🎯T5.1 (both weight 1.7), followed by 🎯T6 and 🎯T17 (both weight 1.5).
+Work on: **🎯T1.8 Jevon imports tern's packages**
+Reason: Highest effective weight (1.7) among unblocked targets. 🎯T5.1 is now achieved, and 🎯T19 is done — the library is mature. Completing the jevon migration closes 🎯T1 (the top-level "complete library" target). This is the highest-leverage next step to realize the value of all the library work done so far.
 
 ## Suggested action
 
-Add the missing COPY lines to the Dockerfile, then push via `/push` to get CI green:
-
-```dockerfile
-COPY protocol/ protocol/
-COPY qr/ qr/
-```
-
-These go after `COPY crypto/ crypto/` and before the `RUN CGO_ENABLED=0 go build` line. After CI is green, proceed with either 🎯T1.8 (jevon migration) or 🎯T5.1 (reorder-tolerant decryption) based on which is more actionable.
+Tag and push a new tern release if needed, then open a branch in the jevon repo to replace `internal/crypto/`, `internal/protocol/`, `internal/qr/`, and `cmd/protogen/` with imports from tern. Update the iOS app to use the `Tern` SPM package. Use `/push` to drive the PR workflow in both repos.
 
 <!-- convergence-deps
 evaluated: 2026-04-06T00:00:00Z
-sha: bf9d713
+sha: 6ee9e4f
 
 🎯T1:
   gap: close
@@ -105,32 +96,52 @@ sha: bf9d713
 
 🎯T1.8:
   gap: not started
-  assessment: "v0.9.0 released. Jevon migration pending."
+  assessment: "v0.9.0 released. Jevon migration pending — requires tagging tern and updating imports."
+  read:
+    - docs/targets.md
+
+🎯T5:
+  gap: significant
+  assessment: "1/4 sub-targets achieved (T5.1). T5.2 unblocked but not started. T5.3 blocked on T10."
   read:
     - docs/targets.md
 
 🎯T5.1:
+  gap: achieved
+  assessment: "ModeDatagrams implemented with full test coverage."
+  read:
+    - crypto/crypto.go
+    - crypto/crypto_test.go
+
+🎯T6:
   gap: not started
-  assessment: "No buffering logic in Channel.Decrypt."
+  assessment: "No investigation artifacts exist."
   read:
     - docs/targets.md
 
 🎯T17:
   gap: not started
-  assessment: "Not started. CI deploy broken — Dockerfile needs protocol/ and qr/."
+  assessment: "No Makefile deploy target. CI deploy now working after Dockerfile fix."
   read:
     - docs/targets.md
     - Dockerfile
 
+🎯T19:
+  gap: achieved
+  assessment: "Hierarchical state machines landed. All generators updated, session.yaml refactored."
+  read:
+    - protocol/protocol.go
+    - protocol/session.yaml
+
 🎯T8:
-  gap: close
+  gap: significant
   assessment: "3/5 sub-targets achieved. T8.4 (TypeScript client) and T8.5 (LAN direct) remain."
   read:
     - docs/targets.md
 
 standing-invariant:
-  gap: failing
-  assessment: "Tests pass. Deploy fails — Dockerfile missing COPY protocol/ and COPY qr/."
+  gap: green
+  assessment: "Tests pass. CI green. Dockerfile fixed."
   read:
     - Dockerfile
 -->
