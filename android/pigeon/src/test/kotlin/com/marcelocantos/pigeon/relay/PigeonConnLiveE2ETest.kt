@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Assumptions
 class PigeonConnLiveE2ETest {
 
     private val token: String? = System.getenv("TERN_TOKEN")
-    private val relayUrl: String = System.getenv("TERN_RELAY_URL") ?: "https://tern.fly.dev:4433"
+    private val relayUrl: String = System.getenv("TERN_RELAY_URL") ?: "https://carrier-pigeon.fly.dev:4433"
     private val repoRoot: String = findRepoRoot()
 
     private fun assumeLive() {

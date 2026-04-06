@@ -43,7 +43,7 @@ class BridgeQuicTransport private constructor(
          * Build the pigeon-bridge binary and start it in register or connect mode.
          *
          * @param repoRoot path to the pigeon repository root (for `go build`)
-         * @param relayUrl the relay URL (e.g. "https://tern.fly.dev:4433")
+         * @param relayUrl the relay URL (e.g. "https://carrier-pigeon.fly.dev:4433")
          * @param mode "register" or "connect"
          * @param token bearer token (for register mode)
          * @param instanceID instance ID (for connect mode)

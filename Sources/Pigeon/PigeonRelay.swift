@@ -187,7 +187,7 @@ public final class PigeonConn: @unchecked Sendable {
     /// Best-effort — errors are silently ignored.
     ///
     /// - Parameters:
-    ///   - host: Relay server hostname (e.g., "pigeon.fly.dev").
+    ///   - host: Relay server hostname (e.g., "carrier-pigeon.fly.dev").
     ///   - port: HTTPS port (typically 443).
     public static func wakeRelay(host: String, port: UInt16 = 443) async {
         guard let url = URL(string: "https://\(host):\(port)/health") else { return }

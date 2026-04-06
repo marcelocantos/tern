@@ -56,14 +56,14 @@ import (
 
 ```go
 // Backend registers with the relay.
-backend, _ := pigeon.Register(ctx, "https://pigeon.fly.dev", pigeon.Config{
+backend, _ := pigeon.Register(ctx, "https://carrier-pigeon.fly.dev", pigeon.Config{
     Token: os.Getenv("PIGEON_TOKEN"),
     TLS:   tlsConfig,
 })
 fmt.Println("Instance ID:", backend.InstanceID()) // share via QR code
 
 // Client connects by instance ID (obtained from QR scan).
-client, _ := pigeon.Connect(ctx, "https://pigeon.fly.dev", instanceID, pigeon.Config{
+client, _ := pigeon.Connect(ctx, "https://carrier-pigeon.fly.dev", instanceID, pigeon.Config{
     TLS: tlsConfig,
 })
 
@@ -296,7 +296,7 @@ are included).
 | Flag / Env var | Default | Description |
 |----------------|---------|-------------|
 | `--port` / `PORT` | `443` | Listening port (UDP + TCP) |
-| `--domain` | — | Domain for automatic Let's Encrypt TLS (e.g. `pigeon.fly.dev`) |
+| `--domain` | — | Domain for automatic Let's Encrypt TLS (e.g. `carrier-pigeon.fly.dev`) |
 | `--acme-email` | — | Email for Let's Encrypt account |
 | `--cert` | — | TLS certificate file (PEM); if `--domain` is not set |
 | `--key` | — | TLS private key file (PEM); used with `--cert` |

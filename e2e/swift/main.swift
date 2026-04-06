@@ -7,7 +7,7 @@
 //
 // Usage:
 //   swift build && .build/debug/tern-e2e-swift                                # local (auto-starts relay)
-//   PIGEON_RELAY_HOST=tern.fly.dev PIGEON_RELAY_PORT=4433 TERN_TOKEN=<t> \
+//   PIGEON_RELAY_HOST=carrier-pigeon.fly.dev PIGEON_RELAY_PORT=4433 TERN_TOKEN=<t> \
 //     .build/debug/tern-e2e-swift                                              # live relay
 
 #if canImport(Network)

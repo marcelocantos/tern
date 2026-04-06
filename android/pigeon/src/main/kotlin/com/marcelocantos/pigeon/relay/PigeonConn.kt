@@ -157,7 +157,7 @@ fun connect(transport: QuicTransport, instanceID: String, host: String? = null):
  * start the machine. No-op if the relay is already running.
  * Best-effort — exceptions are silently ignored.
  *
- * @param host relay hostname (e.g., "pigeon.fly.dev")
+ * @param host relay hostname (e.g., "carrier-pigeon.fly.dev")
  * @param port HTTPS port (typically 443)
  */
 fun wakeRelay(host: String, port: Int = 443) {

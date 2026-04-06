@@ -67,7 +67,7 @@ e2e-swift-live:
 ifndef PIGEON_TOKEN
 	$(error PIGEON_TOKEN is required for live E2E tests)
 endif
-	PIGEON_RELAY_HOST=pigeon.fly.dev PIGEON_RELAY_PORT=4433 PIGEON_TOKEN=$(PIGEON_TOKEN) \
+	PIGEON_RELAY_HOST=carrier-pigeon.fly.dev PIGEON_RELAY_PORT=4433 PIGEON_TOKEN=$(PIGEON_TOKEN) \
 		swift run pigeon-e2e-swift
 
 # --- Benchmarks ---

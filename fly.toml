@@ -1,4 +1,4 @@
-app = "pigeon"
+app = "carrier-pigeon"
 primary_region = "syd"
 
 [build]
@@ -9,7 +9,7 @@ primary_region = "syd"
   QUIC_PORT = "4433"
 
 [processes]
-  app = "/tern --domain tern.fly.dev --acme-email marcelo@cantos.id.au"
+  app = "/pigeon --domain carrier-pigeon.fly.dev --acme-email marcelo@cantos.id.au"
 
 # TCP on port 443 — serves ACME TLS-ALPN-01, HTTPS /health, and
 # Alt-Svc headers. Also acts as the auto-start wake trigger: Fly's

@@ -389,7 +389,7 @@ func TestChaosMultiPair(t *testing.T) {
 }
 
 // TestChaosLive runs a chaos workload against the deployed relay at
-// tern.fly.dev. Requires TERN_TOKEN to be set. No fault proxy —
+// carrier-pigeon.fly.dev. Requires TERN_TOKEN to be set. No fault proxy —
 // tests real network conditions.
 //
 // Run with: TERN_TOKEN=<tok> go test -run TestChaosLive -timeout 600s -v
@@ -404,7 +404,7 @@ func TestChaosLive(t *testing.T) {
 
 	duration := parseDuration("CHAOS_DURATION", 60*time.Second)
 	numPairs := parseIntEnv("CHAOS_PAIRS", 3)
-	t.Logf("chaos live: duration=%v, %d pairs, tern.fly.dev", duration, numPairs)
+	t.Logf("chaos live: duration=%v, %d pairs, carrier-pigeon.fly.dev", duration, numPairs)
 
 	ctx, cancel := context.WithTimeout(context.Background(), duration+30*time.Second)
 	defer cancel()
@@ -420,7 +420,7 @@ func TestChaosLive(t *testing.T) {
 
 			cfg := Config{Token: token}
 
-			b, err := Register(ctx, "https://tern.fly.dev", cfg)
+			b, err := Register(ctx, "https://carrier-pigeon.fly.dev", cfg)
 			if err != nil {
 				t.Errorf("pair %d: register: %v", pairID, err)
 				return
@@ -428,7 +428,7 @@ func TestChaosLive(t *testing.T) {
 			defer b.CloseNow()
 			t.Logf("pair %d: registered as %s", pairID, b.InstanceID())
 
-			c, err := Connect(ctx, "https://tern.fly.dev", b.InstanceID(), cfg)
+			c, err := Connect(ctx, "https://carrier-pigeon.fly.dev", b.InstanceID(), cfg)
 			if err != nil {
 				t.Errorf("pair %d: connect: %v", pairID, err)
 				return

@@ -14,7 +14,7 @@ import { execSync, spawn, ChildProcess } from "node:child_process";
 import path from "node:path";
 
 const TOKEN = process.env.TERN_TOKEN || "";
-const RELAY_URL = process.env.TERN_RELAY_URL || "https://tern.fly.dev:4433";
+const RELAY_URL = process.env.TERN_RELAY_URL || "https://carrier-pigeon.fly.dev:4433";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const BRIDGE_BIN = "/tmp/pigeon-bridge";

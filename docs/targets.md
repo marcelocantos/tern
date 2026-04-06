@@ -174,7 +174,7 @@ to LAN transport.
 Prove the browser WebTransport path works end-to-end.
 
 Playwright headless Chromium does NOT support WebTransport/QUIC —
-tested against both tern.fly.dev and Google's webtransport.day echo
+tested against both carrier-pigeon.fly.dev and Google's webtransport.day echo
 server; both fail with ERR_QUIC_PROTOCOL_ERROR. The Go WebTransport
 client connects to the same server successfully, confirming the server
 is correct.

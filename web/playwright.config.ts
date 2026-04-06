@@ -20,7 +20,7 @@ export default defineConfig({
         launchOptions: {
           args: [
             // Playwright's bundled Chromium may not trust system CAs.
-            // Allow connections to tern.fly.dev with any cert.
+            // Allow connections to carrier-pigeon.fly.dev with any cert.
             "--ignore-certificate-errors",
           ],
         },

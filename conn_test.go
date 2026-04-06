@@ -177,7 +177,7 @@ func localRelayWT(t *testing.T) relayEnv {
 	}
 }
 
-// liveRelay returns a relayEnv for pigeon.fly.dev if PIGEON_TOKEN is set.
+// liveRelay returns a relayEnv for carrier-pigeon.fly.dev if PIGEON_TOKEN is set.
 // Skips the test otherwise. Uses WebTransport since the live relay may
 // not yet have a raw QUIC port.
 func liveRelay(t *testing.T) relayEnv {
@@ -188,7 +188,7 @@ func liveRelay(t *testing.T) relayEnv {
 	}
 
 	env := relayEnv{
-		url: "https://pigeon.fly.dev:443",
+		url: "https://carrier-pigeon.fly.dev:443",
 		cfg: Config{
 			Token:        token,
 			WebTransport: true,
@@ -319,7 +319,7 @@ func liveRelayEnv() (token, url string) {
 	if token == "" {
 		return "", ""
 	}
-	return token, "https://pigeon.fly.dev:443"
+	return token, "https://carrier-pigeon.fly.dev:443"
 }
 
 // localRelayB is localRelay for benchmarks.

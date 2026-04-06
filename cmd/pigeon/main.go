@@ -81,7 +81,7 @@ func main() {
 	quicPort := flag.String("quic-port", "", "raw QUIC listening port (overrides QUIC_PORT env var)")
 	certFile := flag.String("cert", "", "TLS certificate file (PEM)")
 	keyFile := flag.String("key", "", "TLS private key file (PEM)")
-	domain := flag.String("domain", "", "domain for automatic Let's Encrypt TLS (e.g. pigeon.fly.dev)")
+	domain := flag.String("domain", "", "domain for automatic Let's Encrypt TLS (e.g. carrier-pigeon.fly.dev)")
 	acmeEmail := flag.String("acme-email", "", "email for Let's Encrypt account (recommended)")
 	lanAddr := flag.String("lan", "", "LAN listener address for direct connections (e.g. :0, localhost:44333)")
 	flag.Parse()

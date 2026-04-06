@@ -6,7 +6,7 @@ import { createServer } from "http";
 import type { Server } from "http";
 
 // Live relay coordinates. Tests are skipped if TERN_TOKEN is not set.
-const RELAY_URL = process.env.TERN_RELAY_URL || "https://tern.fly.dev";
+const RELAY_URL = process.env.TERN_RELAY_URL || "https://carrier-pigeon.fly.dev";
 const TOKEN = process.env.TERN_TOKEN || "";
 
 /**
