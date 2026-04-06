@@ -1,16 +1,16 @@
 # Convergence Report
 
-Evaluated: 2026-04-05
+Evaluated: 2026-04-06
 
 ## Standing invariants
 
-- **Tests**: PENDING — CI run in progress on master (0ac4f75, post-merge of PR #1). The PR branch CI run passed. `TestHealthMonitorFallback` is now **skipped** (annotated as machine-driven under 🎯T18), resolving the prior 5-run failure streak.
-- **CI**: IN PROGRESS — awaiting result of master push run #24001562484. PR run succeeded.
+- **Tests**: PASSING (test job succeeded on CI run #24001562484)
+- **CI**: FAILING — Deploy to Fly.io fails. Dockerfile missing `COPY protocol/ protocol/` and `COPY qr/ qr/` — the root package now imports these after T18 work (executor.go imports protocol, lan.go imports qr). Tests pass; only the deploy step is broken.
 
 ## Movement
 
-- 🎯T18: not started -> **close** (PR #1 merged: executor, events/commands in YAML, pathRouter deleted, all integration tests pass. Remaining: TLA+ event/command generator, channel migration, skipped health monitor test.)
-- 🎯T1: (unchanged — still converging 7/8, blocked on 🎯T1.8)
+- 🎯T18: close -> **achieved** (moved to Achieved section with full status)
+- 🎯T1, 🎯T5.1, 🎯T6, 🎯T17, 🎯T19: (unchanged)
 - All others: (unchanged)
 
 ## Gap Report
@@ -40,13 +40,10 @@ Status: not started
 
 ### 🎯T17 Makefile deploy target  [weight: 1.5]  (status only)
 Status: not started
+  Implied: CI deploy broken — Dockerfile needs protocol/ and qr/ directories. Fixing the Dockerfile is a prerequisite for any deploy-related work.
 
-### 🎯T18 State machine mediates all Conn behavior  [weight: 1.25]
-Gap: close
-PR #1 merged. The executor is implemented (891 lines), events and commands are declared in session.yaml, the machine's `HandleEvent` returns explicit commands, Conn delegates all I/O to the executor, pathRouter is deleted, and all integration tests pass. Remaining work:
-- TLA+ generator does not yet emit event/command declarations (Phase 8)
-- OpenChannel/DatagramChannel still use legacy routing callbacks rather than going through the executor
-- `TestHealthMonitorFallback` is skipped — the machine-driven health monitor replaces the ad-hoc goroutine, but the test hasn't been updated to validate the new approach
+### 🎯T19 Parallel regions in protocol state machine  [weight: 1.25]  (status only)
+Status: not started
 
 ### 🎯T7 Investigate Bluetooth as proximity oracle  [weight: 1.0]  (status only)
 Status: not started
@@ -82,21 +79,23 @@ Status: not started. Low effective weight.
 
 ## Recommendation
 
-Work on: **🎯T18 State machine mediates all Conn behavior**
-Reason: 🎯T18 is close to achieved with the highest-leverage remaining work items (TLA+ generator, channel migration, health monitor test). Closing it out is cheaper than starting any of the weight-1.7 targets from scratch. 🎯T1.8 and 🎯T5.1 are both "not started" and require more effort. Finishing 🎯T18 also unblocks future work — the executor pattern makes channel migration and health monitoring cleaner.
+Work on: **Fix Dockerfile (CI deploy broken)**
+Reason: Standing invariant violation takes priority over all explicit targets. The Dockerfile is missing `COPY protocol/ protocol/` and `COPY qr/ qr/`, causing every deploy to fail. This is a 2-line fix that restores CI to green. After that, the highest-leverage unblocked targets are 🎯T1.8 and 🎯T5.1 (both weight 1.7), followed by 🎯T6 and 🎯T17 (both weight 1.5).
 
 ## Suggested action
 
-Complete the 🎯T18 remaining items in priority order:
-1. Update `TestHealthMonitorFallback` to validate the machine-driven health monitor (unskip and rewrite against the executor's `ping_tick`/`ping_timeout` event flow).
-2. Migrate OpenChannel/DatagramChannel to go through the executor instead of legacy routing callbacks.
-3. Add event/command declarations to the TLA+ generator (`protocol/tla.go`).
+Add the missing COPY lines to the Dockerfile, then push via `/push` to get CI green:
 
-Start with the health monitor test — it validates that the core machine-driven I/O pattern works for the most complex lifecycle scenario, and gets CI fully green with no skipped tests.
+```dockerfile
+COPY protocol/ protocol/
+COPY qr/ qr/
+```
+
+These go after `COPY crypto/ crypto/` and before the `RUN CGO_ENABLED=0 go build` line. After CI is green, proceed with either 🎯T1.8 (jevon migration) or 🎯T5.1 (reorder-tolerant decryption) based on which is more actionable.
 
 <!-- convergence-deps
-evaluated: 2026-04-05T10:00:00Z
-sha: 0ac4f75
+evaluated: 2026-04-06T00:00:00Z
+sha: bf9d713
 
 🎯T1:
   gap: close
@@ -116,17 +115,12 @@ sha: 0ac4f75
   read:
     - docs/targets.md
 
-🎯T18:
-  gap: close
-  assessment: "PR #1 merged. Executor done, events/commands in YAML, pathRouter deleted. Remaining: TLA+ generator, channel migration, health monitor test."
+🎯T17:
+  gap: not started
+  assessment: "Not started. CI deploy broken — Dockerfile needs protocol/ and qr/."
   read:
-    - executor.go
-    - conn.go
-    - path.go
-    - protocol/session.yaml
-    - protocol/tla.go
-    - pathswitch_test.go
     - docs/targets.md
+    - Dockerfile
 
 🎯T8:
   gap: close
@@ -135,8 +129,8 @@ sha: 0ac4f75
     - docs/targets.md
 
 standing-invariant:
-  gap: pending
-  assessment: "CI in progress on master. PR run passed. TestHealthMonitorFallback skipped."
+  gap: failing
+  assessment: "Tests pass. Deploy fails — Dockerfile missing COPY protocol/ and COPY qr/."
   read:
-    - pathswitch_test.go
+    - Dockerfile
 -->
