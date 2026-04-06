@@ -1,4 +1,4 @@
-module github.com/marcelocantos/tern
+module github.com/marcelocantos/pigeon
 
 go 1.25.0
 

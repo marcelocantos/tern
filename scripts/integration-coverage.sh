@@ -7,7 +7,7 @@
 # Phase A: Normal unit tests (server code runs in-process, captures
 #          client + library coverage).
 # Phase B: Tests against a coverage-instrumented relay binary
-#          (captures cmd/tern server code coverage).
+#          (captures cmd/pigeon server code coverage).
 # Final:   Merge both profiles for the combined picture.
 #
 # Usage:
@@ -41,7 +41,7 @@ echo
 
 # --- Phase B: Tests against instrumented relay binary ---
 echo "=== Phase B: Build coverage-instrumented relay ==="
-go build -cover -o "$COVERDIR/tern-cover" ./cmd/tern || exit 1
+go build -cover -o "$COVERDIR/tern-cover" ./cmd/pigeon || exit 1
 
 QUIC_PORT=$(python3 -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind(('',0)); print(s.getsockname()[1]); s.close()")
 WT_PORT=$(python3 -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind(('',0)); print(s.getsockname()[1]); s.close()")

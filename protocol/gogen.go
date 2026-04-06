@@ -61,7 +61,7 @@ func (p *Protocol) ExportGo(w io.Writer, pkgName, funcName string) error {
 		}
 	} else {
 		b.WriteString("import (\n")
-		b.WriteString("\t\"github.com/marcelocantos/tern/protocol\"\n")
+		b.WriteString("\t\"github.com/marcelocantos/pigeon/protocol\"\n")
 		if needsFrozen {
 			b.WriteString("\t\"github.com/arr-ai/frozen\"\n")
 		}

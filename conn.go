@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-package tern
+package pigeon
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marcelocantos/tern/crypto"
+	"github.com/marcelocantos/pigeon/crypto"
 )
 
 // datagrammer provides unreliable datagram send/receive.

@@ -82,7 +82,7 @@ Reason: Highest effective weight (1.7) among unblocked targets. 🎯T5.1 is now 
 
 ## Suggested action
 
-Tag and push a new tern release if needed, then open a branch in the jevon repo to replace `internal/crypto/`, `internal/protocol/`, `internal/qr/`, and `cmd/protogen/` with imports from tern. Update the iOS app to use the `Tern` SPM package. Use `/push` to drive the PR workflow in both repos.
+Tag and push a new pigeon release if needed, then open a branch in the jevon repo to replace `internal/crypto/`, `internal/protocol/`, `internal/qr/`, and `cmd/protogen/` with imports from tern. Update the iOS app to use the `Tern` SPM package. Use `/push` to drive the PR workflow in both repos.
 
 <!-- convergence-deps
 evaluated: 2026-04-06T00:00:00Z

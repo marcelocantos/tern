@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-package tern
+package pigeon
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/marcelocantos/tern/crypto"
-	"github.com/marcelocantos/tern/protocol"
+	"github.com/marcelocantos/pigeon/crypto"
+	"github.com/marcelocantos/pigeon/protocol"
 	"github.com/quic-go/quic-go"
 )
 

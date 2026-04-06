@@ -1,5 +1,5 @@
-/tern
-/tern-test-binary
+/pigeon
+/pigeon-test-binary
 *.test
 .DS_Store
 sqlite_mcp_server.db
@@ -15,7 +15,7 @@ web/playwright-report/
 
 # Gradle/Android build artifacts
 android/.gradle/
-android/tern/build/
+android/pigeon/build/
 android/build/
 
 # TLC model checker artifacts

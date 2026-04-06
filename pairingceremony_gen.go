@@ -5,4 +5,4 @@
 
 //go:build ignore
 
-package tern
+package pigeon

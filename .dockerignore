@@ -4,7 +4,7 @@
 .claude/
 web/node_modules/
 android/.gradle/
-android/tern/build/
+android/pigeon/build/
 formal/states/
 docs/
 *.test

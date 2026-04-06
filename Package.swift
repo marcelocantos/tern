@@ -3,17 +3,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "Tern",
+    name: "Pigeon",
     platforms: [.iOS(.v16), .macOS(.v13)],
     products: [
-        .library(name: "Tern", targets: ["Tern"]),
+        .library(name: "Pigeon", targets: ["Pigeon"]),
     ],
     targets: [
-        .target(name: "Tern"),
-        .testTarget(name: "TernTests", dependencies: ["Tern"]),
+        .target(name: "Pigeon"),
+        .testTarget(name: "PigeonTests", dependencies: ["Pigeon"]),
         .executableTarget(
-            name: "tern-e2e-swift",
-            dependencies: ["Tern"],
+            name: "pigeon-e2e-swift",
+            dependencies: ["Pigeon"],
             path: "e2e/swift"
         ),
     ]

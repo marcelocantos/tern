@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Node.js E2E test for the tern relay.
-// Uses tern-bridge (Go binary) to connect via QUIC and bridges
+// Uses pigeon-bridge (Go binary) to connect via QUIC and bridges
 // messages over stdin/stdout with length-prefixed framing.
 //
 // Usage:
@@ -17,11 +17,11 @@ const TOKEN = process.env.TERN_TOKEN || "";
 const RELAY_URL = process.env.TERN_RELAY_URL || "https://tern.fly.dev:4433";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
-const BRIDGE_BIN = "/tmp/tern-bridge";
+const BRIDGE_BIN = "/tmp/pigeon-bridge";
 
 // Build the bridge binary once.
 before(() => {
-  execSync(`go build -o ${BRIDGE_BIN} ./cmd/tern-bridge`, {
+  execSync(`go build -o ${BRIDGE_BIN} ./cmd/pigeon-bridge`, {
     cwd: REPO_ROOT,
     stdio: "inherit",
   });
@@ -83,7 +83,7 @@ function spawnBridge(
 }
 
 describe(
-  "Node.js relay E2E (via tern-bridge)",
+  "Node.js relay E2E (via pigeon-bridge)",
   { skip: !TOKEN ? "TERN_TOKEN not set" : false },
   () => {
     it("register assigns instance ID", async () => {

@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-package tern
+package pigeon
 
 import (
 	"context"
@@ -16,8 +16,8 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-// ternALPN is the ALPN protocol identifier for raw QUIC tern connections.
-const ternALPN = "tern"
+// pigeonALPN is the ALPN protocol identifier for raw QUIC tern connections.
+const pigeonALPN = "pigeon"
 
 // quicSession wraps a raw QUIC connection to implement relaySession.
 type quicSession struct {
@@ -106,7 +106,7 @@ func (s *QUICServer) ServeWithTLS(conn net.PacketConn, tlsConfig *tls.Config) er
 	s.conn = conn
 
 	serverTLS := tlsConfig.Clone()
-	serverTLS.NextProtos = []string{ternALPN}
+	serverTLS.NextProtos = []string{pigeonALPN}
 
 	tr := &quic.Transport{Conn: conn}
 	ln, err := tr.Listen(serverTLS, &quic.Config{EnableDatagrams: true})

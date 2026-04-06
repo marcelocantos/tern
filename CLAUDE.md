@@ -4,18 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Tern is a WebTransport relay library and server (Go + Swift) that enables
+Pigeon is a WebTransport relay library and server (Go + Swift) that enables
 connections between devices where the backend is on a private network
 with no ingress. It establishes a virtual WebTransport session over QUIC
 such that the relay itself cannot inspect the traffic.
 
-Applications import tern's packages rather than implementing
+Applications import pigeon's packages rather than implementing
 relay/pairing/crypto logic themselves.
 
 ## Build, Test & Run
 
 ```bash
-go build -o tern ./cmd/tern       # build relay server
+go build -o pigeon ./cmd/pigeon       # build relay server
 go test ./...                     # all Go tests (relay, crypto, protocol, E2E)
 go test -run TestE2E              # E2E integration test only
 swift test                        # Swift crypto + state machine tests
@@ -25,7 +25,7 @@ go run ./cmd/protogen protocol/pairing.yaml  # regenerate from YAML spec
 
 ## Package Structure
 
-### Relay Server (`cmd/tern/main.go`)
+### Relay Server (`cmd/pigeon/main.go`)
 
 WebTransport relay server over QUIC/HTTP3. Backends register and get an
 instance ID; clients connect by ID and traffic is bridged opaquely
@@ -34,17 +34,17 @@ at startup for development; use --cert/--key for production certificates.
 
 **Endpoints (HTTP/3):** `GET /health`, `GET /register`, `GET /ws/{id}`
 
-### Root Package (`tern.go`, `conn.go`, `webtransport.go`)
+### Root Package (`pigeon.go`, `conn.go`, `webtransport.go`)
 
 Client-side connectivity and server library. Backends call
-`tern.Register()` to get an instance ID; clients call
-`tern.Connect()` with the ID. Both return a `*Conn` wrapping a
+`pigeon.Register()` to get an instance ID; clients call
+`pigeon.Connect()` with the ID. Both return a `*Conn` wrapping a
 WebTransport session with `Send`/`Recv` (reliable stream) and
 `SendDatagram`/`RecvDatagram` (unreliable). Supports bearer token
-auth via `tern.WithToken()` and custom TLS via `tern.WithTLS()`.
+auth via `pigeon.WithToken()` and custom TLS via `pigeon.WithTLS()`.
 
 The `WebTransportServer` type provides the relay server library used
-by `cmd/tern`.
+by `cmd/pigeon`.
 
 ### E2E Crypto (`crypto/`)
 
@@ -80,17 +80,17 @@ auth requires completed pairing, no nonce reuse.
 
 Run with `./formal/tlc PairingCeremony`.
 
-### Swift Package (`Package.swift`, `Sources/Tern/`)
+### Swift Package (`Package.swift`, `Sources/Pigeon/`)
 
-SPM library (`Tern`) containing E2ECrypto.swift, TernRelay.swift, and the
+SPM library (`Pigeon`) containing E2ECrypto.swift, PigeonRelay.swift, and the
 generated PairingCeremonyMachine.swift. iOS apps add the GitHub repo as a
 package dependency.
 
-### Android/Kotlin Library (`android/tern/`)
+### Android/Kotlin Library (`android/pigeon/`)
 
-Kotlin/JVM library (`Tern`) containing `E2EKeyPair`, `E2EChannel`,
+Kotlin/JVM library (`Pigeon`) containing `E2EKeyPair`, `E2EChannel`,
 `Hkdf`, `TernConn`, and the generated `PairingCeremonyMachine.kt`. Consumed via
-JitPack (`com.github.marcelocantos.tern:tern:<tag>`).
+JitPack (`com.github.marcelocantos.pigeon:pigeon:<tag>`).
 Requires JDK 17+ / Android API 33+ (for X25519 support).
 
 ## Deployment

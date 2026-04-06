@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-package tern
+package pigeon
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcelocantos/tern/crypto"
+	"github.com/marcelocantos/pigeon/crypto"
 )
 
 // --- Helpers ---

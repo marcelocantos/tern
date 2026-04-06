@@ -1,21 +1,21 @@
-# Tern — Agent Guide
+# Pigeon — Agent Guide
 
-## What Is Tern?
+## What Is Pigeon?
 
-Tern is a Go + Swift library for opaque authenticated WebTransport relay. It provides:
+Pigeon is a Go + Swift library for opaque authenticated WebTransport relay. It provides:
 
 - A relay server that bridges WebTransport sessions without seeing plaintext
 - E2E encryption (X25519 ECDH + AES-256-GCM) with a pairing ceremony and MitM detection
 - A declarative protocol state machine framework with code generation (Go, Swift, TLA+, PlantUML)
-- A Swift package (`Tern`) for iOS 16+/macOS 13+
+- A Swift package (`Pigeon`) for iOS 16+/macOS 13+
 
 ## Go Packages
 
 | Package | Import | Purpose |
 |---------|--------|---------|
-| `crypto` | `github.com/marcelocantos/tern/crypto` | Key exchange, encrypted channel, confirmation code |
-| `protocol` | `github.com/marcelocantos/tern/protocol` | State machine framework + pairing ceremony |
-| `qr` | `github.com/marcelocantos/tern/qr` | Terminal QR rendering, LAN IP detection |
+| `crypto` | `github.com/marcelocantos/pigeon/crypto` | Key exchange, encrypted channel, confirmation code |
+| `protocol` | `github.com/marcelocantos/pigeon/protocol` | State machine framework + pairing ceremony |
+| `qr` | `github.com/marcelocantos/pigeon/qr` | Terminal QR rendering, LAN IP detection |
 
 ### crypto/
 
@@ -60,15 +60,15 @@ ip := qr.LanIP()         // "192.168.1.5" or "localhost" on error
 
 ```go
 // Register as a backend — returns a Conn with an assigned instance ID.
-conn, err := tern.Register(ctx, "https://relay.example.com",
-    tern.WithToken("bearer-token"),
-    tern.WithTLS(&tls.Config{RootCAs: pool}))
+conn, err := pigeon.Register(ctx, "https://relay.example.com",
+    pigeon.WithToken("bearer-token"),
+    pigeon.WithTLS(&tls.Config{RootCAs: pool}))
 defer conn.Close()
 id := conn.InstanceID()
 
 // Connect as a client to a specific backend instance.
-conn, err := tern.Connect(ctx, "https://relay.example.com", instanceID,
-    tern.WithTLS(&tls.Config{RootCAs: pool}))
+conn, err := pigeon.Connect(ctx, "https://relay.example.com", instanceID,
+    pigeon.WithTLS(&tls.Config{RootCAs: pool}))
 defer conn.Close()
 
 // Stream messages (reliable, ordered).
@@ -97,10 +97,10 @@ One client per instance. A second client connection returns HTTP 409.
 ## Swift (SPM)
 
 ```
-https://github.com/marcelocantos/tern
+https://github.com/marcelocantos/pigeon
 ```
 
-Product: `Tern`. Platforms: iOS 16+, macOS 13+.
+Product: `Pigeon`. Platforms: iOS 16+, macOS 13+.
 
 ```swift
 let kp = E2EKeyPair()
@@ -156,7 +156,7 @@ data, _ := record.Marshal()
 // On reconnect — load and derive channel
 record, _ := crypto.UnmarshalPairingRecord(data)
 ch, _ := record.DeriveChannel([]byte("client-to-server"), []byte("server-to-client"))
-conn, _ := tern.Connect(ctx, record.RelayURL, record.PeerInstanceID)
+conn, _ := pigeon.Connect(ctx, record.RelayURL, record.PeerInstanceID)
 conn.SetChannel(ch)
 ```
 
@@ -170,11 +170,11 @@ Kotlin (`PairingRecord`), TypeScript (`PairingRecord` /
 ```bash
 go test ./...                             # all Go tests (relay, crypto, protocol, qr, E2E)
 swift test                                # Swift tests
-go build -o tern ./cmd/tern               # build relay binary
+go build -o pigeon ./cmd/pigeon               # build relay binary
 go run ./cmd/protogen protocol/pairing.yaml   # regenerate state machine code
 ./formal/tlc PairingCeremony              # run TLA+ model checker
-PORT=443 ./tern                           # run relay server (self-signed cert)
-./tern --cert cert.pem --key key.pem      # run with real TLS certificate
+PORT=443 ./pigeon                           # run relay server (self-signed cert)
+./pigeon --cert cert.pem --key key.pem      # run with real TLS certificate
 ```
 
 ## Configuration
@@ -188,6 +188,6 @@ PORT=443 ./tern                           # run relay server (self-signed cert)
 | `--key` | — | TLS private key file (PEM) |
 | `--version` | — | Print version and exit |
 | `--help-agent` | — | Print this guide |
-| `TERN_TOKEN` | — | Bearer token for /register auth |
+| `PIGEON_TOKEN` | — | Bearer token for /register auth |
 
 Build-time version injection: `-ldflags "-X main.version=<version>"`.

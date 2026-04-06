@@ -1,6 +1,6 @@
 # Stability
 
-This document tracks tern's readiness for a 1.0 release — the point at which
+This document tracks pigeon's readiness for a 1.0 release — the point at which
 backwards compatibility becomes a binding commitment. Once v1.0.0 ships,
 breaking changes to any public surface listed below require a major version bump.
 
@@ -29,7 +29,7 @@ CORS: `Access-Control-Allow-Origin: *` on health endpoint (for browser Alt-Svc p
 
 *Stability: Stable.*
 
-### CLI interface (the `tern` binary)
+### CLI interface (the `pigeon` binary)
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
@@ -78,7 +78,7 @@ Incomplete assemblies are discarded after 5 seconds (configurable).
 
 *Stability: Stable.*
 
-### Root Go package (`github.com/marcelocantos/tern`)
+### Root Go package (`github.com/marcelocantos/pigeon`)
 
 ```go
 // Conn type
@@ -327,7 +327,7 @@ func LanIP() string
 
 *Stability: Stable.*
 
-### Swift `Tern` package (SPM)
+### Swift `Pigeon` package (SPM)
 
 ```swift
 // E2EKeyPair

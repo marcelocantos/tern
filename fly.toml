@@ -1,4 +1,4 @@
-app = "tern"
+app = "pigeon"
 primary_region = "syd"
 
 [build]

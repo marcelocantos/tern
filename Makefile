@@ -44,31 +44,31 @@ e2e-go:
 	go test -count=1 -timeout=60s -run "TestStreamRoundTrip/local" .
 
 e2e-swift:
-	swift run tern-e2e-swift
+	swift run pigeon-e2e-swift
 
 e2e-kotlin:
 	JAVA_HOME=$(JDK21) android/gradlew \
-		-p $(CURDIR)/android :tern:test --no-daemon --console=plain \
-		--tests "com.marcelocantos.tern.relay.TernConnE2ETest"
+		-p $(CURDIR)/android :pigeon:test --no-daemon --console=plain \
+		--tests "com.marcelocantos.pigeon.relay.TernConnE2ETest"
 
-# --- E2E tests against live relay (require TERN_TOKEN) ---
+# --- E2E tests against live relay (require PIGEON_TOKEN) ---
 
 e2e-live: e2e-go-live e2e-swift-live
 
 e2e-go-live:
-ifndef TERN_TOKEN
-	$(error TERN_TOKEN is required for live E2E tests)
+ifndef PIGEON_TOKEN
+	$(error PIGEON_TOKEN is required for live E2E tests)
 endif
-	TERN_TOKEN=$(TERN_TOKEN) go test -count=1 -timeout=120s -v \
+	PIGEON_TOKEN=$(PIGEON_TOKEN) go test -count=1 -timeout=120s -v \
 		-run "TestStreamRoundTrip/live" . 2>&1 \
 		| grep -E '^\s*(=== RUN|--- |ok |FAIL)'
 
 e2e-swift-live:
-ifndef TERN_TOKEN
-	$(error TERN_TOKEN is required for live E2E tests)
+ifndef PIGEON_TOKEN
+	$(error PIGEON_TOKEN is required for live E2E tests)
 endif
-	TERN_RELAY_HOST=tern.fly.dev TERN_RELAY_PORT=4433 TERN_TOKEN=$(TERN_TOKEN) \
-		swift run tern-e2e-swift
+	PIGEON_RELAY_HOST=pigeon.fly.dev PIGEON_RELAY_PORT=4433 PIGEON_TOKEN=$(PIGEON_TOKEN) \
+		swift run pigeon-e2e-swift
 
 # --- Benchmarks ---
 
@@ -76,15 +76,15 @@ bench:
 	go test -bench=. -benchtime=2s -count=1 -timeout=120s -run=^$$ .
 
 bench-live:
-ifndef TERN_TOKEN
-	$(error TERN_TOKEN is required for live benchmarks)
+ifndef PIGEON_TOKEN
+	$(error PIGEON_TOKEN is required for live benchmarks)
 endif
-	TERN_TOKEN=$(TERN_TOKEN) go test -bench=. -benchtime=2s -count=1 -timeout=120s -run=^$$ .
+	PIGEON_TOKEN=$(PIGEON_TOKEN) go test -bench=. -benchtime=2s -count=1 -timeout=120s -run=^$$ .
 
 # --- Server ---
 
 server:
-	go run ./cmd/tern
+	go run ./cmd/pigeon
 
 # --- Code generation ---
 
@@ -95,5 +95,5 @@ generate:
 
 clean:
 	rm -rf .build/
-	rm -f tern tern-test-binary tern-e2e-server
+	rm -f pigeon pigeon-test-binary pigeon-e2e-server
 	go clean -testcache

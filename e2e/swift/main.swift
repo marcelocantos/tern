@@ -2,24 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Standalone E2E test for Swift QUIC relay connectivity.
-// Uses raw NWConnection (not the TernRelay wrapper) to prove the
-// protocol works end-to-end. TernRelay wrapper tests are separate.
+// Uses raw NWConnection (not the PigeonRelay wrapper) to prove the
+// protocol works end-to-end. PigeonRelay wrapper tests are separate.
 //
 // Usage:
 //   swift build && .build/debug/tern-e2e-swift                                # local (auto-starts relay)
-//   TERN_RELAY_HOST=tern.fly.dev TERN_RELAY_PORT=4433 TERN_TOKEN=<t> \
+//   PIGEON_RELAY_HOST=tern.fly.dev PIGEON_RELAY_PORT=4433 TERN_TOKEN=<t> \
 //     .build/debug/tern-e2e-swift                                              # live relay
 
 #if canImport(Network)
 
 import Foundation
 import Network
-import Tern
+import Pigeon
 
 // MARK: - Config
 
-let relayHost = ProcessInfo.processInfo.environment["TERN_RELAY_HOST"] ?? "127.0.0.1"
-let relayPort = UInt16(ProcessInfo.processInfo.environment["TERN_RELAY_PORT"] ?? "4433")!
+let relayHost = ProcessInfo.processInfo.environment["PIGEON_RELAY_HOST"] ?? "127.0.0.1"
+let relayPort = UInt16(ProcessInfo.processInfo.environment["PIGEON_RELAY_PORT"] ?? "4433")!
 let relayToken = ProcessInfo.processInfo.environment["TERN_TOKEN"]
 let isLocal = relayHost == "127.0.0.1" || relayHost == "localhost"
 

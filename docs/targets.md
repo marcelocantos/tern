@@ -2,7 +2,7 @@
 
 ## Active
 
-### 🎯T1 Tern is a complete library for opaque authenticated relay
+### 🎯T1 Pigeon is a complete library for opaque authenticated relay
 
 All crypto, protocol state machines, code generators, QR helper, and
 Swift package live here. Applications import tern rather than duplicating
@@ -12,7 +12,7 @@ relay/pairing logic.
 
 **Sub-targets:**
 
-#### 🎯T1.8 Jevon imports tern's packages
+#### 🎯T1.8 Jevon imports pigeon's packages
 
 Jevon's `internal/crypto/`, `internal/protocol/`, `internal/qr/`, and
 `cmd/protogen/` are replaced by imports from tern. iOS app imports

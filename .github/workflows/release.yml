@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Release workflow — triggered when a GitHub release is published.
-# Builds the tern relay binary for three platforms and uploads tarballs
+# Builds the pigeon relay binary for three platforms and uploads tarballs
 # to the existing release. Also triggers homebrew-releaser to update the
 # marcelocantos/homebrew-tap formula.
 #
@@ -60,14 +60,14 @@ jobs:
           CGO_ENABLED: "0"
           VERSION: ${{ github.event.release.tag_name }}
         run: |
-          go build -ldflags "-X main.version=${VERSION}" -o tern ./cmd/tern
+          go build -ldflags "-X main.version=${VERSION}" -o pigeon ./cmd/pigeon
 
       - name: Package tarball
         env:
           VERSION: ${{ github.event.release.tag_name }}
         run: |
-          TARBALL="tern-${VERSION#v}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz"
-          tar czf "${TARBALL}" tern
+          TARBALL="pigeon-${VERSION#v}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz"
+          tar czf "${TARBALL}" pigeon
           echo "TARBALL=${TARBALL}" >> "$GITHUB_ENV"
 
       - name: Upload to release
@@ -89,10 +89,10 @@ jobs:
           github_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           formula_folder: Formula
           version: ${{ github.event.release.tag_name }}
-          install: 'bin.install "tern" => "tern"'
+          install: 'bin.install "pigeon" => "pigeon"'
           target_darwin_arm64: true
           target_linux_amd64: true
           target_linux_arm64: true
-          test: 'system bin/"tern", "--version"'
+          test: 'system bin/"pigeon", "--version"'
           skip_checksum: true
           update_readme_table: true

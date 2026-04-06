@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-package tern
+package pigeon
 
 import (
 	"context"
@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcelocantos/tern/crypto"
+	"github.com/marcelocantos/pigeon/crypto"
 	"github.com/quic-go/quic-go"
 )
 
@@ -177,14 +177,14 @@ func localRelayWT(t *testing.T) relayEnv {
 	}
 }
 
-// liveRelay returns a relayEnv for tern.fly.dev if TERN_TOKEN is set.
+// liveRelay returns a relayEnv for tern.fly.dev if PIGEON_TOKEN is set.
 // Skips the test otherwise. Uses WebTransport since the live relay may
 // not yet have a raw QUIC port.
 func liveRelay(t *testing.T) relayEnv {
 	t.Helper()
-	token := os.Getenv("TERN_TOKEN")
+	token := os.Getenv("PIGEON_TOKEN")
 	if token == "" {
-		t.Skip("TERN_TOKEN not set; skipping live test")
+		t.Skip("PIGEON_TOKEN not set; skipping live test")
 	}
 
 	env := relayEnv{
@@ -313,9 +313,9 @@ func setupDatagramEncryption(t *testing.T, b, c *Conn) {
 }
 
 // liveRelayEnv returns the token and URL for the live relay, or empty
-// strings if TERN_TOKEN is not set.
+// strings if PIGEON_TOKEN is not set.
 func liveRelayEnv() (token, url string) {
-	token = os.Getenv("TERN_TOKEN")
+	token = os.Getenv("PIGEON_TOKEN")
 	if token == "" {
 		return "", ""
 	}

@@ -1,2 +1,2 @@
-rootProject.name = "tern-android"
-include(":tern")
+rootProject.name = "pigeon-android"
+include(":pigeon")

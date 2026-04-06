@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-package tern
+package pigeon
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marcelocantos/tern/qr"
+	"github.com/marcelocantos/pigeon/qr"
 	"github.com/quic-go/quic-go"
 )
 

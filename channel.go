@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-package tern
+package pigeon
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/marcelocantos/tern/crypto"
+	"github.com/marcelocantos/pigeon/crypto"
 )
 
 // StreamChannel is a named, encrypted bidirectional stream.

@@ -13,8 +13,8 @@
 //	protocol/<name>_gen.go  (skipped when --root-pkg is set)
 //	formal/<Name>.tla
 //	docs/<name>.puml
-//	Sources/Tern/<Name>Machine.swift
-//	android/tern/src/main/kotlin/com/marcelocantos/tern/crypto/<Name>Machine.kt
+//	Sources/Pigeon/<Name>Machine.swift
+//	android/tern/src/main/kotlin/com.marcelocantos.pigeon/crypto/<Name>Machine.kt
 //	web/src/<Name>Machine.ts
 //	<name>_gen.go           (only when --root-pkg is set)
 package main
@@ -25,7 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/marcelocantos/tern/protocol"
+	"github.com/marcelocantos/pigeon/protocol"
 )
 
 func main() {
@@ -130,7 +130,7 @@ func main() {
 					filepath.Join("android", "tern", "src", "main", "kotlin",
 						"com", "marcelocantos", "tern", "crypto", p.Name+"Machine.kt"),
 					func(f *os.File) error {
-						return p.ExportKotlin(f, "com.marcelocantos.tern.crypto")
+						return p.ExportKotlin(f, "com.marcelocantos.pigeon.crypto")
 					},
 				)
 			},

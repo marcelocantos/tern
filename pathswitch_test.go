@@ -4,7 +4,7 @@
 // Deterministic tests for every path-switching scenario. Each test
 // sets up a specific condition and verifies the exact outcome.
 
-package tern
+package pigeon
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcelocantos/tern/crypto"
+	"github.com/marcelocantos/pigeon/crypto"
 )
 
 // blackholeDatagram silently drops all datagrams. Used to simulate

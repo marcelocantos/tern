@@ -1,9 +1,9 @@
-# Tern
+# Pigeon
 
-Tern is a WebTransport relay library and server (Go + Swift) that enables
+Pigeon is a WebTransport relay library and server (Go + Swift) that enables
 connections between devices where the backend sits on a private network
 with no ingress. The relay forwards opaque ciphertext over QUIC — it never
-sees plaintext traffic. Applications import tern's packages rather than
+sees plaintext traffic. Applications import pigeon's packages rather than
 implementing relay, pairing, or crypto logic themselves.
 
 ## Trust Model
@@ -28,20 +28,20 @@ The relay server handles only ciphertext and has no access to session keys.
    all traffic bidirectionally between the two WebTransport sessions —
    both reliable streams and unreliable datagrams.
 3. Pairing and encryption happen above the relay layer, in the
-   application, using tern's crypto and protocol packages.
+   application, using pigeon's crypto and protocol packages.
 
 ## Go Library
 
 ```bash
-go get github.com/marcelocantos/tern
+go get github.com/marcelocantos/pigeon
 ```
 
 ```go
 import (
-    "github.com/marcelocantos/tern"
-    "github.com/marcelocantos/tern/crypto"
-    "github.com/marcelocantos/tern/protocol"
-    "github.com/marcelocantos/tern/qr"
+    "github.com/marcelocantos/pigeon"
+    "github.com/marcelocantos/pigeon/crypto"
+    "github.com/marcelocantos/pigeon/protocol"
+    "github.com/marcelocantos/pigeon/qr"
 )
 ```
 
@@ -56,14 +56,14 @@ import (
 
 ```go
 // Backend registers with the relay.
-backend, _ := tern.Register(ctx, "https://tern.fly.dev", tern.Config{
-    Token: os.Getenv("TERN_TOKEN"),
+backend, _ := pigeon.Register(ctx, "https://pigeon.fly.dev", pigeon.Config{
+    Token: os.Getenv("PIGEON_TOKEN"),
     TLS:   tlsConfig,
 })
 fmt.Println("Instance ID:", backend.InstanceID()) // share via QR code
 
 // Client connects by instance ID (obtained from QR scan).
-client, _ := tern.Connect(ctx, "https://tern.fly.dev", instanceID, tern.Config{
+client, _ := pigeon.Connect(ctx, "https://pigeon.fly.dev", instanceID, pigeon.Config{
     TLS: tlsConfig,
 })
 
@@ -105,10 +105,10 @@ plaintext, _ := ch.Decrypt(encrypted)
 Add the GitHub repo as an SPM dependency:
 
 ```
-https://github.com/marcelocantos/tern
+https://github.com/marcelocantos/pigeon
 ```
 
-The package provides the `Tern` library (iOS 16+, macOS 13+)
+The package provides the `Pigeon` library (iOS 16+, macOS 13+)
 containing `E2ECrypto.swift` (key exchange and encrypted channel),
 `TernRelay.swift` (relay connectivity), and the generated
 `PairingCeremonyMachine.swift`.
@@ -138,7 +138,7 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("com.github.marcelocantos.tern:tern:v0.5.0")
+    implementation("com.github.marcelocantos.pigeon:pigeon:v0.5.0")
 }
 ```
 
@@ -191,7 +191,7 @@ os.WriteFile("pairing.json", data, 0600)
 data, _ = os.ReadFile("pairing.json")
 record, _ = crypto.UnmarshalPairingRecord(data)
 ch, _ := record.DeriveChannel([]byte("client-to-server"), []byte("server-to-client"))
-conn, _ := tern.Connect(ctx, record.RelayURL, record.PeerInstanceID)
+conn, _ := pigeon.Connect(ctx, record.RelayURL, record.PeerInstanceID)
 conn.SetChannel(ch)
 ```
 
@@ -231,16 +231,16 @@ from the relay to a direct QUIC connection:
 
 ```go
 // Backend: start a LAN server and register with the relay.
-lan, _ := tern.NewLANServer("", nil)  // random port, self-signed cert
+lan, _ := pigeon.NewLANServer("", nil)  // random port, self-signed cert
 defer lan.Close()
 
-backend, _ := tern.Register(ctx, relayURL, tern.Config{
+backend, _ := pigeon.Register(ctx, relayURL, pigeon.Config{
     LANServer: lan,
 })
 backend.SetChannel(ch)  // triggers LAN address advertisement
 
 // Client: enable LAN upgrade.
-client, _ := tern.Connect(ctx, relayURL, instanceID, tern.Config{
+client, _ := pigeon.Connect(ctx, relayURL, instanceID, pigeon.Config{
     LAN: true,
 })
 client.SetChannel(ch)
@@ -275,9 +275,9 @@ throttling, blackhole periods, sequence-aware drop (`WithDropAfter`,
 ## Running the Relay Server
 
 ```bash
-go build -o tern ./cmd/tern
-PORT=443 ./tern                           # self-signed cert (development)
-./tern --cert cert.pem --key key.pem      # production TLS certificate
+go build -o pigeon ./cmd/pigeon
+PORT=443 ./pigeon                           # self-signed cert (development)
+./pigeon --cert cert.pem --key key.pem      # production TLS certificate
 ```
 
 The server is also deployable via Fly.io (`fly.toml` and `Dockerfile`
@@ -296,15 +296,15 @@ are included).
 | Flag / Env var | Default | Description |
 |----------------|---------|-------------|
 | `--port` / `PORT` | `443` | Listening port (UDP + TCP) |
-| `--domain` | — | Domain for automatic Let's Encrypt TLS (e.g. `tern.fly.dev`) |
+| `--domain` | — | Domain for automatic Let's Encrypt TLS (e.g. `pigeon.fly.dev`) |
 | `--acme-email` | — | Email for Let's Encrypt account |
 | `--cert` | — | TLS certificate file (PEM); if `--domain` is not set |
 | `--key` | — | TLS private key file (PEM); used with `--cert` |
-| `TERN_TOKEN` | — | Bearer token required for `/register`; open if unset |
+| `PIGEON_TOKEN` | — | Bearer token required for `/register`; open if unset |
 | `--version` | — | Print version and exit |
 | `--help-agent` | — | Print usage + agent guide |
 
-Build-time version injection: `go build -ldflags "-X main.version=v1.0.0" ./cmd/tern`
+Build-time version injection: `go build -ldflags "-X main.version=v1.0.0" ./cmd/pigeon`
 
 Max message frame size: 1 MiB (constant `maxMessageSize`).
 

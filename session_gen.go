@@ -3,10 +3,10 @@
 
 // Code generated from protocol/*.yaml. DO NOT EDIT.
 
-package tern
+package pigeon
 
 import (
-	"github.com/marcelocantos/tern/protocol"
+	"github.com/marcelocantos/pigeon/protocol"
 	"github.com/arr-ai/frozen"
 )
 

@@ -1,7 +1,7 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-package tern
+package pigeon
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcelocantos/tern/faultproxy"
+	"github.com/marcelocantos/pigeon/faultproxy"
 )
 
 // faultyRelay starts a local relay and returns a relayEnv that routes

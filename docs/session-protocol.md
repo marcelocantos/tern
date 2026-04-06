@@ -1,6 +1,6 @@
 # Session Protocol
 
-Tern's session protocol manages the entire lifecycle of a connection
+Pigeon's session protocol manages the entire lifecycle of a connection
 between two devices: from initial pairing through ongoing transport
 path management. It is defined as a single state machine in
 [`protocol/session.yaml`](../protocol/session.yaml) and verified
