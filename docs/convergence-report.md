@@ -16,12 +16,12 @@ Evaluated: 2026-04-07
 
 ### 🎯T20 Cross-language E2E test parity  [weight: 2.5]
 Gap: not started
-Parent target. 0/4 sub-targets achieved. Swift standalone E2E binary exists but is not in `swift test`. Kotlin has local E2E tests (PigeonConnE2ETest starts relay subprocess). TypeScript E2E requires live relay + TERN_TOKEN. No state machine unit tests in any non-Go language.
+Parent target. 0/4 sub-targets achieved. Swift standalone E2E binary exists but is not in `swift test`. Kotlin has local E2E tests (PigeonConnE2ETest starts relay subprocess). TypeScript E2E requires live relay + PIGEON_TOKEN. No state machine unit tests in any non-Go language.
 
   [ ] 🎯T20.1 Swift E2E integrated into `swift test` — not started: standalone `e2e/swift/main.swift` exists, Package.swift has `PigeonTests` target but no relay E2E test target
   [ ] 🎯T20.2 State machine unit tests for Swift/Kotlin/TypeScript — not started
   [ ] 🎯T20.3 Cross-language confirmation code interop test — not started (blocked on 🎯T20.1, 🎯T20.2)
-  [ ] 🎯T20.4 TypeScript local E2E tests — not started: `relay.e2e.ts` exists but requires TERN_TOKEN, no local relay subprocess
+  [ ] 🎯T20.4 TypeScript local E2E tests — not started: `relay.e2e.ts` exists but requires PIGEON_TOKEN, no local relay subprocess
 
 ### 🎯T1.8 Jevon imports pigeon's packages  [weight: 1.7]
 Gap: not started
@@ -163,7 +163,7 @@ sha: e27b3c0
 
 🎯T20.4:
   gap: not started
-  assessment: "relay.e2e.ts exists but skips when TERN_TOKEN not set. No local relay subprocess like Kotlin has."
+  assessment: "relay.e2e.ts exists but skips when PIGEON_TOKEN not set. No local relay subprocess like Kotlin has."
   read:
     - web/src/relay.e2e.ts
 

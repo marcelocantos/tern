@@ -110,7 +110,7 @@ https://github.com/marcelocantos/pigeon
 
 The package provides the `Pigeon` library (iOS 16+, macOS 13+)
 containing `E2ECrypto.swift` (key exchange and encrypted channel),
-`TernRelay.swift` (relay connectivity), and the generated
+`PigeonRelay.swift` (relay connectivity), and the generated
 `PairingCeremonyMachine.swift`.
 
 ```swift

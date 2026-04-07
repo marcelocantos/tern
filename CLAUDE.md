@@ -89,7 +89,7 @@ package dependency.
 ### Android/Kotlin Library (`android/pigeon/`)
 
 Kotlin/JVM library (`Pigeon`) containing `E2EKeyPair`, `E2EChannel`,
-`Hkdf`, `TernConn`, and the generated `PairingCeremonyMachine.kt`. Consumed via
+`Hkdf`, `PigeonConn`, and the generated `PairingCeremonyMachine.kt`. Consumed via
 JitPack (`com.github.marcelocantos.pigeon:pigeon:<tag>`).
 Requires JDK 17+ / Android API 33+ (for X25519 support).
 

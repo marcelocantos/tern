@@ -5,7 +5,7 @@
 ### 🎯T1 Pigeon is a complete library for opaque authenticated relay
 
 All crypto, protocol state machines, code generators, QR helper, and
-Swift package live here. Applications import tern rather than duplicating
+Swift package live here. Applications import pigeon rather than duplicating
 relay/pairing logic.
 
 - **Weight**: 1.7 (value 5 / cost 3)
@@ -15,11 +15,11 @@ relay/pairing logic.
 #### 🎯T1.8 Jevon imports pigeon's packages
 
 Jevon's `internal/crypto/`, `internal/protocol/`, `internal/qr/`, and
-`cmd/protogen/` are replaced by imports from tern. iOS app imports
-the `Tern` SPM package.
+`cmd/protogen/` are replaced by imports from pigeon. iOS app imports
+the `Pigeon` SPM package.
 
 - **Weight**: 1.7 (value 5 / cost 3)
-- **Status**: not started (requires tern to be tagged and pushed)
+- **Status**: not started (requires pigeon to be tagged and pushed)
 
 ---
 
@@ -28,7 +28,7 @@ the `Tern` SPM package.
 ### 🎯T5 Multi-transport with LAN upgrade
 
 Devices connected through the relay can discover they're on the same
-LAN and upgrade to a direct connection. The `tern.Conn` abstraction
+LAN and upgrade to a direct connection. The `pigeon.Conn` abstraction
 hides this — callers see a single ordered message stream regardless
 of transport.
 
@@ -56,7 +56,7 @@ closes the old transport after receiving `CUTOVER`.
 
 #### 🎯T5.4 Transport-agnostic Conn
 
-`tern.Conn` manages multiple underlying transports. Sends go on the
+`pigeon.Conn` manages multiple underlying transports. Sends go on the
 preferred transport; receives come from any transport and are delivered
 in sequence order. Upgrading and downgrading are transparent to the
 caller.
@@ -83,7 +83,7 @@ Same cutover protocol as 🎯T5.3 applies — it's just another transport.
 
 Needs investigation:
 - STUN server requirements (run our own, or use public ones?)
-- UDP vs TCP hole-punching (tern already uses QUIC/UDP via WebTransport)
+- UDP vs TCP hole-punching (pigeon already uses QUIC/UDP via WebTransport)
 - Success rate across NAT types (symmetric NATs defeat STUN)
 - Whether to use ICE (the full WebRTC negotiation framework) or a
   simpler STUN-only approach
@@ -370,7 +370,7 @@ PIGEON_TOKEN). Add local E2E tests that start a Go relay subprocess
 
 ### 🎯T2 Open-source ready — gates v0.1.0
 
-All sub-targets done. Tern is a credible public project with correct
+All sub-targets done. Pigeon is a credible public project with correct
 code, proper licensing, documentation, and CI.
 
 - **Weight**: 1 (value 1 / cost 1)
@@ -530,7 +530,7 @@ All sub-targets done.
 - **Weight**: 1 (value 1 / cost 1)
 - **Status**: done
 
-### 🎯T11.1 Core TernConn with register/connect/send/recv
+### 🎯T11.1 Core PigeonConn with register/connect/send/recv
 
 - **Weight**: 1 (value 1 / cost 1)
 - **Status**: done
