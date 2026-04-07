@@ -5,7 +5,7 @@
 ### 🎯T1 Pigeon is a complete library for opaque authenticated relay
 
 All crypto, protocol state machines, code generators, QR helper, and
-Swift package live here. Applications import tern rather than duplicating
+Swift package live here. Applications import pigeon rather than duplicating
 relay/pairing logic.
 
 - **Weight**: 1.7 (value 5 / cost 3)
@@ -15,11 +15,11 @@ relay/pairing logic.
 #### 🎯T1.8 Jevon imports pigeon's packages
 
 Jevon's `internal/crypto/`, `internal/protocol/`, `internal/qr/`, and
-`cmd/protogen/` are replaced by imports from tern. iOS app imports
-the `Tern` SPM package.
+`cmd/protogen/` are replaced by imports from pigeon. iOS app imports
+the `Pigeon` SPM package.
 
 - **Weight**: 1.7 (value 5 / cost 3)
-- **Status**: not started (requires tern to be tagged and pushed)
+- **Status**: not started (requires pigeon to be tagged and pushed)
 
 ---
 
@@ -28,7 +28,7 @@ the `Tern` SPM package.
 ### 🎯T5 Multi-transport with LAN upgrade
 
 Devices connected through the relay can discover they're on the same
-LAN and upgrade to a direct connection. The `tern.Conn` abstraction
+LAN and upgrade to a direct connection. The `pigeon.Conn` abstraction
 hides this — callers see a single ordered message stream regardless
 of transport.
 
@@ -56,7 +56,7 @@ closes the old transport after receiving `CUTOVER`.
 
 #### 🎯T5.4 Transport-agnostic Conn
 
-`tern.Conn` manages multiple underlying transports. Sends go on the
+`pigeon.Conn` manages multiple underlying transports. Sends go on the
 preferred transport; receives come from any transport and are delivered
 in sequence order. Upgrading and downgrading are transparent to the
 caller.
@@ -83,7 +83,7 @@ Same cutover protocol as 🎯T5.3 applies — it's just another transport.
 
 Needs investigation:
 - STUN server requirements (run our own, or use public ones?)
-- UDP vs TCP hole-punching (tern already uses QUIC/UDP via WebTransport)
+- UDP vs TCP hole-punching (pigeon already uses QUIC/UDP via WebTransport)
 - Success rate across NAT types (symmetric NATs defeat STUN)
 - Whether to use ICE (the full WebRTC negotiation framework) or a
   simpler STUN-only approach
@@ -219,6 +219,60 @@ tests work without manual machine management.
 
 ---
 
+### 🎯T20 Cross-language E2E test parity
+
+Every language that has a generated state machine and client library
+has automated E2E tests that connect to a real Go relay, exercise the
+full pairing ceremony (ECDH + confirmation code), and exchange
+encrypted messages. Tests run in CI without manual intervention.
+
+- **Weight**: 2.5 (value 5 / cost 2)
+- **Status**: not started
+
+#### 🎯T20.1 Swift E2E integrated into `swift test`
+
+The standalone E2E binary (`e2e/swift/main.swift`) works but is not
+run by `swift test`. Integrate it as an XCTest target that starts a
+Go relay subprocess and exercises register, connect, stream round-trip,
+encrypted round-trip, and confirmation code verification.
+
+- **Weight**: 2.5 (value 5 / cost 2)
+- **Status**: not started (standalone binary exists, needs test target integration)
+
+#### 🎯T20.2 State machine unit tests for Swift/Kotlin/TypeScript
+
+The generated `handleEvent` machines are only tested implicitly through
+relay E2E tests. Each language should have explicit unit tests that
+verify: state transitions for the transport phase (relay → LAN offered
+→ LAN active → degraded → fallback → backoff → re-establish), correct
+command emission per transition, and guard evaluation.
+
+- **Weight**: 1.7 (value 5 / cost 3)
+- **Status**: not started
+
+#### 🎯T20.3 Cross-language confirmation code interop test
+
+A Go backend and each non-Go client (Swift, Kotlin, TypeScript) perform
+a full ECDH key exchange through a live relay and independently derive
+the 6-digit confirmation code. The test asserts both sides compute the
+same code. Currently each language hardcodes "629624" in unit tests but
+no test verifies agreement through an actual relay.
+
+- **Weight**: 2.5 (value 5 / cost 2)
+- **Status**: not started
+- **Depends on**: 🎯T20.1 (Swift), 🎯T20.2 implicitly
+
+#### 🎯T20.4 TypeScript local E2E tests
+
+TypeScript tests currently only run against a live relay (requiring
+PIGEON_TOKEN). Add local E2E tests that start a Go relay subprocess
+(like Kotlin does) so they run in CI without credentials.
+
+- **Weight**: 2.0 (value 4 / cost 2)
+- **Status**: not started
+
+---
+
 ## Achieved
 
 ### 🎯T19 Hierarchical state machines in protocol framework
@@ -316,7 +370,7 @@ tests work without manual machine management.
 
 ### 🎯T2 Open-source ready — gates v0.1.0
 
-All sub-targets done. Tern is a credible public project with correct
+All sub-targets done. Pigeon is a credible public project with correct
 code, proper licensing, documentation, and CI.
 
 - **Weight**: 1 (value 1 / cost 1)
@@ -476,7 +530,7 @@ All sub-targets done.
 - **Weight**: 1 (value 1 / cost 1)
 - **Status**: done
 
-### 🎯T11.1 Core TernConn with register/connect/send/recv
+### 🎯T11.1 Core PigeonConn with register/connect/send/recv
 
 - **Weight**: 1 (value 1 / cost 1)
 - **Status**: done

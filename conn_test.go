@@ -76,7 +76,7 @@ func localRelay(t *testing.T) relayEnv {
 	t.Helper()
 	// If an external instrumented relay is running (e.g. for coverage),
 	// use it instead of starting our own.
-	if qURL := os.Getenv("TERN_TEST_QUIC_URL"); qURL != "" {
+	if qURL := os.Getenv("PIGEON_TEST_QUIC_URL"); qURL != "" {
 		u, _ := url.Parse(qURL)
 		return relayEnv{
 			url: qURL,
@@ -137,7 +137,7 @@ func localRelayWT(t *testing.T) relayEnv {
 	t.Helper()
 
 	// If an external instrumented relay is running, use it.
-	if wtURL := os.Getenv("TERN_TEST_WT_URL"); wtURL != "" {
+	if wtURL := os.Getenv("PIGEON_TEST_WT_URL"); wtURL != "" {
 		return relayEnv{
 			url: wtURL,
 			cfg: Config{
@@ -1079,7 +1079,11 @@ func TestQUICUnknownHandshake(t *testing.T) {
 	defer cancel()
 
 	clientTLS := &tls.Config{RootCAs: pool, NextProtos: []string{pigeonALPN}}
-	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal("dial:", err)
 	}
@@ -1128,7 +1132,11 @@ func TestQUICInvalidInstanceIDConnect(t *testing.T) {
 
 	// Connect with a too-long instance ID (>64 chars).
 	clientTLS := &tls.Config{RootCAs: pool, NextProtos: []string{pigeonALPN}}
-	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal("dial:", err)
 	}
@@ -1863,7 +1871,11 @@ func TestQUICHandshakeDroppedConnection(t *testing.T) {
 
 	// Scenario 1: Connect and immediately close without opening a stream.
 	// This exercises the "accept stream failed" path.
-	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal("dial:", err)
 	}
@@ -1872,7 +1884,11 @@ func TestQUICHandshakeDroppedConnection(t *testing.T) {
 
 	// Scenario 2: Open a stream and close before sending the handshake.
 	// This exercises the "read handshake failed" path.
-	conn2, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	conn2, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal("dial:", err)
 	}
@@ -1911,7 +1927,11 @@ func TestQUICRegisterWriteIDFails(t *testing.T) {
 	defer cancel()
 
 	clientTLS := &tls.Config{RootCAs: pool, NextProtos: []string{pigeonALPN}}
-	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	conn, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal("dial:", err)
 	}
@@ -1952,7 +1972,11 @@ func TestConnectToOccupiedInstanceViaQUICRaw(t *testing.T) {
 	clientTLS := &tls.Config{RootCAs: pool, NextProtos: []string{pigeonALPN}}
 
 	// Register a backend.
-	conn1, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	conn1, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal("dial:", err)
 	}
@@ -1973,7 +1997,11 @@ func TestConnectToOccupiedInstanceViaQUICRaw(t *testing.T) {
 	t.Logf("registered instance: %s", instanceID)
 
 	// First client connects.
-	conn2, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	conn2, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal("dial c1:", err)
 	}
@@ -1990,7 +2018,11 @@ func TestConnectToOccupiedInstanceViaQUICRaw(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Second client connects to the same instance.
-	conn3, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{EnableDatagrams: true})
+	conn3, err := quic.DialAddr(ctx, addr, clientTLS, &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		t.Fatal("dial c2:", err)
 	}
@@ -2013,7 +2045,7 @@ func TestConnectToOccupiedInstanceViaQUICRaw(t *testing.T) {
 }
 
 // TestConnectWTNilTLSConfig exercises the nil TLS config path in
-// connectWebTransport (tern.go:278-279) and registerWebTransport (tern.go:229-231).
+// connectWebTransport (pigeon.go:278-279) and registerWebTransport (pigeon.go:229-231).
 // The dial will fail because there's no trust anchor for the self-signed cert,
 // but the nil-config branch is exercised before the failure.
 func TestConnectWTNilTLSConfig(t *testing.T) {

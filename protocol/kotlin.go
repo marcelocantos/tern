@@ -26,18 +26,10 @@ func (p *Protocol) ExportKotlin(w io.Writer, pkg string) error {
 	b.WriteString("// Source of truth: protocol/*.yaml\n\n")
 	fmt.Fprintf(&b, "package %s\n\n", pkg)
 
-	// Message type enum.
-	b.WriteString("enum class MessageType(val value: String) {\n")
-	for i, m := range p.Messages {
-		comma := ","
-		if i == len(p.Messages)-1 {
-			comma = ";"
-		}
-		fmt.Fprintf(&b, "    %s(\"%s\")%s\n", kotlinPascalCase(string(m.Type)), m.Type, comma)
-	}
-	b.WriteString("}\n\n")
+	protoName := kotlinTypeName(p.Name)
+	protoPrefix := protoName + "Protocol"
 
-	// Per-actor state enum.
+	// Per-actor state enums at package scope — names are already unique per actor.
 	for _, a := range p.Actors {
 		typeName := kotlinTypeName(a.Name)
 		states := collectStates(a)
@@ -53,98 +45,116 @@ func (p *Protocol) ExportKotlin(w io.Writer, pkg string) error {
 		b.WriteString("}\n\n")
 	}
 
-	// Guard ID enum.
+	// Protocol namespace — contains shared enums (MessageType, GuardID, ActionID,
+	// EventID, CmdID), wire constants, and per-actor transition tables.
+	// Nesting these prevents name collisions when multiple protocol files share
+	// the same Kotlin package.
+	b.WriteString("/** The protocol transition table and shared type enums. */\n")
+	fmt.Fprintf(&b, "object %s {\n\n", protoPrefix)
+
+	// Message type enum (nested).
+	b.WriteString("    enum class MessageType(val value: String) {\n")
+	for i, m := range p.Messages {
+		comma := ","
+		if i == len(p.Messages)-1 {
+			comma = ";"
+		}
+		fmt.Fprintf(&b, "        %s(\"%s\")%s\n", kotlinPascalCase(string(m.Type)), m.Type, comma)
+	}
+	b.WriteString("    }\n\n")
+
+	// Guard ID enum (nested).
 	if len(p.Guards) > 0 {
-		b.WriteString("enum class GuardID(val value: String) {\n")
+		b.WriteString("    enum class GuardID(val value: String) {\n")
 		for i, g := range p.Guards {
 			comma := ","
 			if i == len(p.Guards)-1 {
 				comma = ";"
 			}
-			fmt.Fprintf(&b, "    %s(\"%s\")%s\n", kotlinPascalCase(string(g.ID)), g.ID, comma)
+			fmt.Fprintf(&b, "        %s(\"%s\")%s\n", kotlinPascalCase(string(g.ID)), g.ID, comma)
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// Action ID enum.
+	// Action ID enum (nested).
 	actions := collectActions(p)
 	if len(actions) > 0 {
-		b.WriteString("enum class ActionID(val value: String) {\n")
+		b.WriteString("    enum class ActionID(val value: String) {\n")
 		for i, id := range actions {
 			comma := ","
 			if i == len(actions)-1 {
 				comma = ";"
 			}
-			fmt.Fprintf(&b, "    %s(\"%s\")%s\n", kotlinPascalCase(id), id, comma)
+			fmt.Fprintf(&b, "        %s(\"%s\")%s\n", kotlinPascalCase(id), id, comma)
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// EventID enum — declared events + internal transition events + recv_* events.
+	// EventID enum (nested) — declared events + internal transition events + recv_* events.
 	events := collectKotlinEvents(p)
 	if len(events) > 0 {
-		b.WriteString("enum class EventID(val value: String) {\n")
+		b.WriteString("    enum class EventID(val value: String) {\n")
 		for i, id := range events {
 			comma := ","
 			if i == len(events)-1 {
 				comma = ";"
 			}
-			fmt.Fprintf(&b, "    %s(\"%s\")%s\n", kotlinPascalCase(id), id, comma)
+			fmt.Fprintf(&b, "        %s(\"%s\")%s\n", kotlinPascalCase(id), id, comma)
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// CmdID enum — from commands: section.
+	// CmdID enum (nested) — from commands: section.
 	if len(p.Commands) > 0 {
-		b.WriteString("enum class CmdID(val value: String) {\n")
+		b.WriteString("    enum class CmdID(val value: String) {\n")
 		for i, c := range p.Commands {
 			comma := ","
 			if i == len(p.Commands)-1 {
 				comma = ";"
 			}
-			fmt.Fprintf(&b, "    %s(\"%s\")%s\n", kotlinPascalCase(string(c.ID)), c.ID, comma)
+			fmt.Fprintf(&b, "        %s(\"%s\")%s\n", kotlinPascalCase(string(c.ID)), c.ID, comma)
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// Wire constants.
+	// Wire constants (nested).
 	if len(p.WireConsts) > 0 {
-		b.WriteString("/** Protocol wire constants shared across all platforms. */\n")
-		b.WriteString("object Wire {\n")
+		b.WriteString("    /** Protocol wire constants shared across all platforms. */\n")
+		b.WriteString("    object Wire {\n")
 		for _, wc := range p.WireConsts {
 			name := kotlinConstName(wc.Name)
 			switch wc.Type {
 			case "byte":
-				fmt.Fprintf(&b, "    const val %s: Byte = 0x%02X.toByte()\n", name, wireInt(wc.Value))
+				fmt.Fprintf(&b, "        const val %s: Byte = 0x%02X.toByte()\n", name, wireInt(wc.Value))
 			case "int":
-				fmt.Fprintf(&b, "    const val %s = %d\n", name, wireInt(wc.Value))
+				fmt.Fprintf(&b, "        const val %s = %d\n", name, wireInt(wc.Value))
 			case "duration_ms":
-				fmt.Fprintf(&b, "    const val %s = %dL // ms\n", name, wireInt(wc.Value))
+				fmt.Fprintf(&b, "        const val %s = %dL // ms\n", name, wireInt(wc.Value))
 			case "string":
-				fmt.Fprintf(&b, "    const val %s = %q\n", name, wc.Value)
+				fmt.Fprintf(&b, "        const val %s = %q\n", name, wc.Value)
 			}
 		}
-		b.WriteString("}\n\n")
+		b.WriteString("    }\n\n")
 	}
 
-	// Transition table per actor.
+	// Transition table per actor (nested).
 	for _, a := range p.Actors {
 		typeName := kotlinTypeName(a.Name)
-		fmt.Fprintf(&b, "/** %s transition table. */\n", a.Name)
-		fmt.Fprintf(&b, "object %sTable {\n", typeName)
-		fmt.Fprintf(&b, "    val initial = %sState.%s\n\n", typeName, a.Initial)
+		fmt.Fprintf(&b, "    /** %s transition table. */\n", a.Name)
+		fmt.Fprintf(&b, "    object %sTable {\n", typeName)
+		fmt.Fprintf(&b, "        val initial = %sState.%s\n\n", typeName, a.Initial)
 
-		fmt.Fprintf(&b, "    data class Transition(\n")
-		b.WriteString("        val from: String,\n")
-		b.WriteString("        val to: String,\n")
-		b.WriteString("        val on: String,\n")
-		b.WriteString("        val onKind: String,\n")
-		b.WriteString("        val guard: String? = null,\n")
-		b.WriteString("        val action: String? = null,\n")
-		b.WriteString("        val sends: List<Pair<String, String>> = emptyList(),\n")
-		b.WriteString("    )\n\n")
+		fmt.Fprintf(&b, "        data class Transition(\n")
+		b.WriteString("            val from: String,\n")
+		b.WriteString("            val to: String,\n")
+		b.WriteString("            val on: String,\n")
+		b.WriteString("            val onKind: String,\n")
+		b.WriteString("            val guard: String? = null,\n")
+		b.WriteString("            val action: String? = null,\n")
+		b.WriteString("            val sends: List<Pair<String, String>> = emptyList(),\n")
+		b.WriteString("        )\n\n")
 
-		b.WriteString("    val transitions = listOf(\n")
+		b.WriteString("        val transitions = listOf(\n")
 		for _, t := range a.FlattenedTransitions() {
 			onKind := "internal"
 			onValue := t.On.Desc
@@ -171,12 +181,15 @@ func (p *Protocol) ExportKotlin(w io.Writer, pkg string) error {
 				sends = "listOf(" + strings.Join(parts, ", ") + ")"
 			}
 
-			fmt.Fprintf(&b, "        Transition(%q, %q, %q, %q, %s, %s, %s),\n",
+			fmt.Fprintf(&b, "            Transition(%q, %q, %q, %q, %s, %s, %s),\n",
 				t.From, t.To, onValue, onKind, guardStr, actionStr, sends)
 		}
-		b.WriteString("    )\n")
-		b.WriteString("}\n\n")
+		b.WriteString("        )\n")
+		b.WriteString("    }\n\n")
 	}
+
+	// Close the protocol namespace object.
+	b.WriteString("}\n\n")
 
 	// Per-actor typed machine classes with handleEvent.
 	for _, a := range p.Actors {
@@ -210,33 +223,33 @@ func (p *Protocol) ExportKotlin(w io.Writer, pkg string) error {
 		}
 
 		if len(p.Guards) > 0 {
-			b.WriteString("    val guards = mutableMapOf<GuardID, () -> Boolean>()\n")
+			fmt.Fprintf(&b, "    val guards = mutableMapOf<%s.GuardID, () -> Boolean>()\n", protoPrefix)
 		}
 		if len(actions) > 0 {
-			b.WriteString("    val actions = mutableMapOf<ActionID, () -> Unit>()\n")
+			fmt.Fprintf(&b, "    val actions = mutableMapOf<%s.ActionID, () -> Unit>()\n", protoPrefix)
 		}
 
 		b.WriteString("\n")
 
 		// handleEvent method — unified entry point returning commands.
 		b.WriteString("    /** Handle an event and return the list of commands to execute. */\n")
-		b.WriteString("    fun handleEvent(ev: EventID): List<CmdID> {\n")
+		fmt.Fprintf(&b, "    fun handleEvent(ev: %s.EventID): List<%s.CmdID> {\n", protoPrefix, protoPrefix)
 		b.WriteString("        val cmds = when {\n")
 
 		for _, t := range a.FlattenedTransitions() {
 			// Determine event constant.
 			var eventConst string
 			if t.On.Kind == TriggerRecv {
-				eventConst = "EventID." + kotlinPascalCase("recv_"+string(t.On.Msg))
+				eventConst = protoPrefix + ".EventID." + kotlinPascalCase("recv_"+string(t.On.Msg))
 			} else {
-				eventConst = "EventID." + kotlinPascalCase(t.On.Desc)
+				eventConst = protoPrefix + ".EventID." + kotlinPascalCase(t.On.Desc)
 			}
 
 			// Guard condition.
 			guardCond := ""
 			if t.Guard != "" {
-				guardCond = fmt.Sprintf(" && guards[GuardID.%s]?.invoke() == true",
-					kotlinPascalCase(string(t.Guard)))
+				guardCond = fmt.Sprintf(" && guards[%s.GuardID.%s]?.invoke() == true",
+					protoPrefix, kotlinPascalCase(string(t.Guard)))
 			}
 
 			fmt.Fprintf(&b, "            state == %sState.%s && ev == %s%s ->\n",
@@ -247,8 +260,8 @@ func (p *Protocol) ExportKotlin(w io.Writer, pkg string) error {
 
 			// Action call.
 			if t.Do != "" {
-				fmt.Fprintf(&b, "                    actions[ActionID.%s]?.invoke()\n",
-					kotlinPascalCase(string(t.Do)))
+				fmt.Fprintf(&b, "                    actions[%s.ActionID.%s]?.invoke()\n",
+					protoPrefix, kotlinPascalCase(string(t.Do)))
 			}
 
 			// Variable updates.
@@ -270,7 +283,7 @@ func (p *Protocol) ExportKotlin(w io.Writer, pkg string) error {
 					if i > 0 {
 						b.WriteString(", ")
 					}
-					fmt.Fprintf(&b, "CmdID.%s", kotlinPascalCase(string(cmd)))
+					fmt.Fprintf(&b, "%s.CmdID.%s", protoPrefix, kotlinPascalCase(string(cmd)))
 				}
 				b.WriteString(")\n")
 			} else {

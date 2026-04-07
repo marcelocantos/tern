@@ -14,7 +14,7 @@
 //	formal/<Name>.tla
 //	docs/<name>.puml
 //	Sources/Pigeon/<Name>Machine.swift
-//	android/tern/src/main/kotlin/com.marcelocantos.pigeon/crypto/<Name>Machine.kt
+//	android/pigeon/src/main/kotlin/com.marcelocantos.pigeon/crypto/<Name>Machine.kt
 //	web/src/<Name>Machine.ts
 //	<name>_gen.go           (only when --root-pkg is set)
 package main
@@ -114,21 +114,21 @@ func main() {
 			},
 		},
 		{
-			path: filepath.Join("Sources", "Tern", p.Name+"Machine.swift"),
+			path: filepath.Join("Sources", "Pigeon", p.Name+"Machine.swift"),
 			gen: func() error {
 				return writeFile(
-					filepath.Join("Sources", "Tern", p.Name+"Machine.swift"),
+					filepath.Join("Sources", "Pigeon", p.Name+"Machine.swift"),
 					func(f *os.File) error { return p.ExportSwift(f) },
 				)
 			},
 		},
 		{
-			path: filepath.Join("android", "tern", "src", "main", "kotlin",
-				"com", "marcelocantos", "tern", "crypto", p.Name+"Machine.kt"),
+			path: filepath.Join("android", "pigeon", "src", "main", "kotlin",
+				"com", "marcelocantos", "pigeon", "crypto", p.Name+"Machine.kt"),
 			gen: func() error {
 				return writeFile(
-					filepath.Join("android", "tern", "src", "main", "kotlin",
-						"com", "marcelocantos", "tern", "crypto", p.Name+"Machine.kt"),
+					filepath.Join("android", "pigeon", "src", "main", "kotlin",
+						"com", "marcelocantos", "pigeon", "crypto", p.Name+"Machine.kt"),
 					func(f *os.File) error {
 						return p.ExportKotlin(f, "com.marcelocantos.pigeon.crypto")
 					},

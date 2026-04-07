@@ -1,12 +1,12 @@
 // Copyright 2026 Marcelo Cantos
 // SPDX-License-Identifier: Apache-2.0
 
-// Package tern provides client-side connectivity to a tern relay server.
+// Package pigeon provides client-side connectivity to a pigeon relay server.
 // Backends call Register to obtain an instance ID; clients call Connect
 // with a known instance ID. Both return a Conn for bidirectional
 // message exchange over QUIC.
 //
-// By default, Register and Connect use raw QUIC (ALPN "tern") for
+// By default, Register and Connect use raw QUIC (ALPN "pigeon") for
 // native clients. Use WithWebTransport() for browser-oriented paths
 // that require WebTransport (HTTP/3).
 //
@@ -100,7 +100,7 @@ func WakeRelay(ctx context.Context, relayURL string, c Config) error {
 }
 
 // Register connects to the relay as a backend. By default uses raw QUIC
-// (ALPN "tern"). The relay assigns an instance ID, returned via
+// (ALPN "pigeon"). The relay assigns an instance ID, returned via
 // InstanceID(). The caller is responsible for closing the connection.
 func Register(ctx context.Context, relayURL string, c Config) (*Conn, error) {
 	WakeRelay(ctx, relayURL, c) // best-effort; wakes Fly.io if auto-stopped
@@ -126,7 +126,7 @@ func Register(ctx context.Context, relayURL string, c Config) (*Conn, error) {
 }
 
 // Connect connects to a relay as a client targeting a specific backend
-// instance ID. By default uses raw QUIC (ALPN "tern").
+// instance ID. By default uses raw QUIC (ALPN "pigeon").
 func Connect(ctx context.Context, relayURL, instanceID string, c Config) (*Conn, error) {
 	WakeRelay(ctx, relayURL, c) // best-effort; wakes Fly.io if auto-stopped
 
@@ -185,7 +185,11 @@ func registerQUIC(ctx context.Context, relayURL string, c Config) (*Conn, error)
 		return nil, err
 	}
 
-	conn, err := quic.DialAddr(ctx, addr, quicTLSConfig(c), &quic.Config{EnableDatagrams: true})
+	conn, err := quic.DialAddr(ctx, addr, quicTLSConfig(c), &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("register: quic dial: %w", err)
 	}
@@ -223,7 +227,11 @@ func connectQUIC(ctx context.Context, relayURL, instanceID string, c Config) (*C
 		return nil, err
 	}
 
-	conn, err := quic.DialAddr(ctx, addr, quicTLSConfig(c), &quic.Config{EnableDatagrams: true})
+	conn, err := quic.DialAddr(ctx, addr, quicTLSConfig(c), &quic.Config{
+		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: quic dial: %w", instanceID, err)
 	}

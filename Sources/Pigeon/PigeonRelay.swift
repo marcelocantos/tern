@@ -98,9 +98,9 @@ public final class PigeonConn: @unchecked Sendable {
         let idData = try await readMessage(conn)
         let instanceID = String(decoding: idData, as: UTF8.self)
 
-        let ternConn = PigeonConn(connection: conn, queue: queue, instanceID: instanceID)
-        ternConn.startDatagramReceiver()
-        return ternConn
+        let pigeonConn = PigeonConn(connection: conn, queue: queue, instanceID: instanceID)
+        pigeonConn.startDatagramReceiver()
+        return pigeonConn
     }
 
     /// Connect as a client to a specific backend instance.
@@ -128,9 +128,9 @@ public final class PigeonConn: @unchecked Sendable {
         // Send handshake.
         try await writeMessage(conn, Data(handshake.utf8))
 
-        let ternConn = PigeonConn(connection: conn, queue: queue, instanceID: instanceID)
-        ternConn.startDatagramReceiver()
-        return ternConn
+        let pigeonConn = PigeonConn(connection: conn, queue: queue, instanceID: instanceID)
+        pigeonConn.startDatagramReceiver()
+        return pigeonConn
     }
 
     /// Send a message on the primary stream (length-prefixed).

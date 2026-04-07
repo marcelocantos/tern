@@ -34,11 +34,11 @@ import (
 //
 // Usage:
 //
-//	lan, _ := tern.NewLANServer(tlsConfig)  // random port
+//	lan, _ := pigeon.NewLANServer(tlsConfig)  // random port
 //	defer lan.Close()
 //
 //	// Register with the relay, passing the LAN server.
-//	b, _ := tern.Register(ctx, relayURL, tern.WithLANServer(lan))
+//	b, _ := pigeon.Register(ctx, relayURL, pigeon.WithLANServer(lan))
 //	// The LAN address is automatically advertised to connecting clients.
 type LANServer struct {
 	listener *quic.Listener
@@ -70,15 +70,17 @@ func NewLANServer(addr string, tlsConfig *tls.Config) (*LANServer, error) {
 		}
 		tlsConfig = &tls.Config{
 			Certificates: []tls.Certificate{cert},
-			NextProtos:   []string{"tern-lan"},
+			NextProtos:   []string{"pigeon-lan"},
 		}
 	} else {
 		tlsConfig = tlsConfig.Clone()
-		tlsConfig.NextProtos = []string{"tern-lan"}
+		tlsConfig.NextProtos = []string{"pigeon-lan"}
 	}
 
 	listener, err := quic.ListenAddr(addr, tlsConfig, &quic.Config{
 		EnableDatagrams: true,
+		MaxIdleTimeout:  60 * time.Second,
+		KeepAlivePeriod: 10 * time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("LAN listen: %w", err)
