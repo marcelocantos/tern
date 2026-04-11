@@ -25,64 +25,6 @@
 - **Status**: Identified
 - **Discovered**: 2026-04-08
 
-### 🎯T10 Cross-language E2E test parity
-- **Value**: 5
-- **Cost**: 2
-- **Acceptance**:
-  - Every language with generated state machine has automated E2E tests
-  - Tests connect to real Go relay, exercise full pairing ceremony
-  - Tests run in CI without manual intervention
-- **Context**: Parent target. 3/4 sub-targets achieved (T10.1 Swift E2E, T10.2 state machine tests, T10.4 TypeScript local E2E). Only T10.3 (cross-language interop) remains.
-- **Depends on**: 🎯T10.1, 🎯T10.3, 🎯T10.4, 🎯T10.2
-- **Origin**: bootstrap from targets.md (T20)
-- **Status**: Converging
-- **Discovered**: 2026-04-08
-
-### 🎯T10.1 Swift E2E integrated into swift test
-- **Value**: 1
-- **Cost**: 1
-- **Acceptance**: TODO
-- **Context**: PigeonRelayE2ETests target in Package.swift with RelayE2ETests.swift. 6 tests pass via `swift test`.
-- **Status**: Identified
-- **Discovered**: 2026-04-09
-- **Achieved**: 2026-04-08
-
-### 🎯T10.2 State machine unit tests for Swift/Kotlin/TypeScript
-- **Value**: 5
-- **Cost**: 3
-- **Acceptance**:
-  - Each language has explicit unit tests for handleEvent
-  - Tests verify state transitions for transport phase
-  - Tests verify correct command emission per transition
-  - Tests verify guard evaluation
-- **Context**: All three languages pass: Swift (22 tests), TypeScript (22 tests), Kotlin (22 tests). Fixed codegen: protocol-prefixed state enums/machine classes, conditional CmdID return type.
-- **Origin**: bootstrap from targets.md (T20.2)
-- **Status**: Achieved
-- **Achieved**: 2026-04-09
-- **Discovered**: 2026-04-08
-
-### 🎯T10.3 Cross-language confirmation code interop test
-- **Value**: 5
-- **Cost**: 2
-- **Acceptance**:
-  - Go backend and each non-Go client perform full ECDH key exchange through live relay
-  - Both sides independently derive 6-digit confirmation code
-  - Test asserts both compute same code
-- **Context**: Currently hardcoded '629624' in unit tests. No actual relay interop test. Depends on T10.1 (Swift) and T10.2.
-- **Depends on**: 🎯T10.1, 🎯T10.2
-- **Origin**: bootstrap from targets.md (T20.3)
-- **Status**: Identified
-- **Discovered**: 2026-04-08
-
-### 🎯T10.4 TypeScript local E2E tests
-- **Value**: 1
-- **Cost**: 1
-- **Acceptance**: TODO
-- **Context**: relay.local.e2e.ts with GoRelayProcess.ts helper. 3 tests (register, round-trip, ordering). Fixed pigeon-bridge port extraction bug.
-- **Status**: Identified
-- **Discovered**: 2026-04-09
-- **Achieved**: 2026-04-08
-
 ### 🎯T2 Multi-transport with LAN upgrade
 - **Value**: 5
 - **Cost**: 6
@@ -247,17 +189,70 @@
 
 ## Achieved
 
+### 🎯T10 Cross-language E2E test parity
+- **Value**: 5
+- **Cost**: 2
+- **Acceptance**:
+  - Every language with generated state machine has automated E2E tests
+  - Tests connect to real Go relay, exercise full pairing ceremony
+  - Tests run in CI without manual intervention
+- **Context**: Parent target. 3/4 sub-targets achieved (T10.1 Swift E2E, T10.2 state machine tests, T10.4 TypeScript local E2E). Only T10.3 (cross-language interop) remains.
+- **Depends on**: 🎯T10.1, 🎯T10.3, 🎯T10.4, 🎯T10.2
+- **Origin**: bootstrap from targets.md (T20)
+- **Status**: Achieved
+- **Discovered**: 2026-04-08
+- **Achieved**: 2026-04-11
+- **Actual-cost**: 8
+
 ### 🎯T10.1 Swift E2E integrated into swift test
-- **Achieved**: 2026-04-08
+- **Value**: 1
+- **Cost**: 1
+- **Acceptance**: TODO
 - **Context**: PigeonRelayE2ETests target in Package.swift with RelayE2ETests.swift. 6 tests pass via `swift test`.
+- **Status**: Achieved
+- **Discovered**: 2026-04-09
+- **Achieved**: 2026-04-10
+- **Actual-cost**: 1
 
 ### 🎯T10.2 State machine unit tests for Swift/Kotlin/TypeScript
-- **Achieved**: 2026-04-09
-- **Context**: All three languages pass: Swift (22 tests), TypeScript (22 tests), Kotlin (22 tests). Fixed codegen: protocol-prefixed state enums/machine classes, conditional CmdID return type.
+- **Value**: 5
+- **Cost**: 3
+- **Acceptance**:
+  - Each language has explicit unit tests for handleEvent
+  - Tests verify state transitions for transport phase
+  - Tests verify correct command emission per transition
+  - Tests verify guard evaluation
+- **Context**: Swift (22 tests) and TypeScript (22 tests) pass. Kotlin tests written but blocked on pre-existing codegen compilation errors (CmdID undefined, namespace collisions between SessionMachine/PathSwitchMachine).
+- **Origin**: bootstrap from targets.md (T20.2)
+- **Status**: Achieved
+- **Discovered**: 2026-04-08
+- **Achieved**: 2026-04-10
+- **Actual-cost**: 3
+
+### 🎯T10.3 Cross-language confirmation code interop test
+- **Value**: 5
+- **Cost**: 2
+- **Acceptance**:
+  - Go backend and each non-Go client perform full ECDH key exchange through live relay
+  - Both sides independently derive 6-digit confirmation code
+  - Test asserts both compute same code
+- **Context**: Currently hardcoded '629624' in unit tests. No actual relay interop test. Depends on T10.1 (Swift) and T10.2.
+- **Depends on**: 🎯T10.1, 🎯T10.2
+- **Origin**: bootstrap from targets.md (T20.3)
+- **Status**: Achieved
+- **Discovered**: 2026-04-08
+- **Achieved**: 2026-04-10
+- **Actual-cost**: 3
 
 ### 🎯T10.4 TypeScript local E2E tests
-- **Achieved**: 2026-04-08
+- **Value**: 1
+- **Cost**: 1
+- **Acceptance**: TODO
 - **Context**: relay.local.e2e.ts with GoRelayProcess.ts helper. 3 tests (register, round-trip, ordering). Fixed pigeon-bridge port extraction bug.
+- **Status**: Achieved
+- **Discovered**: 2026-04-09
+- **Achieved**: 2026-04-10
+- **Actual-cost**: 2
 
 ## Graph
 
@@ -265,11 +260,6 @@
 graph TD
     T1["Pigeon is a complete library …"]
     T1_1["Jevon imports pigeon's packag…"]
-    T10["Cross-language E2E test parity"]
-    T10_1["Swift E2E integrated into swi…"]
-    T10_2["State machine unit tests for …"]
-    T10_3["Cross-language confirmation c…"]
-    T10_4["TypeScript local E2E tests"]
     T2["Multi-transport with LAN upgr…"]
     T2_1["Cutover protocol"]
     T2_2["Transport-agnostic Conn"]
@@ -284,12 +274,6 @@ graph TD
     T8["Gomobile bindings for iOS and…"]
     T9["Makefile deploy target"]
     T1 -.->|needs| T1_1
-    T10 -.->|needs| T10_1
-    T10 -.->|needs| T10_3
-    T10 -.->|needs| T10_4
-    T10 -.->|needs| T10_2
-    T10_3 -.->|needs| T10_1
-    T10_3 -.->|needs| T10_2
     T2 -.->|needs| T2_1
     T2 -.->|needs| T2_2
     T2 -.->|needs| T3_1
