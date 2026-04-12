@@ -28,3 +28,5 @@ formal/tla2tools.jar
 states/
 formal/*_TTrace_*.tla
 .sawmill/
+dist/
+c/test/test_pigeon
