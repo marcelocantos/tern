@@ -77,7 +77,7 @@ int pigeon_server_step(pigeon_server_machine *m, pairing_ceremony_event_id event
 		m->state = PIGEON_SERVER_WAITING_FOR_CLIENT;
 		return 1;
 	}
-	if (m->state == PIGEON_SERVER_DERIVE_SECRET && event == PIGEON_EVENT_E_C_D_H_COMPLETE) {
+	if (m->state == PIGEON_SERVER_DERIVE_SECRET && event == PIGEON_EVENT_ECDH_COMPLETE) {
 		m->state = PIGEON_SERVER_SEND_ACK;
 		return 1;
 	}
@@ -144,10 +144,10 @@ int pigeon_ios_handle_message(pigeon_ios_machine *m, pairing_ceremony_msg_type m
 		}
 		// received_server_pub: recv_msg.pubkey (set by action)
 		// client_shared_key: DeriveKey("client_pub", recv_msg.pubkey) (set by action)
-		m->state = PIGEON_APP_E2_E_READY;
+		m->state = PIGEON_APP_E2E_READY;
 		return 1;
 	}
-	if (m->state == PIGEON_APP_E2_E_READY && msg == PIGEON_MSG_PAIR_CONFIRM) {
+	if (m->state == PIGEON_APP_E2E_READY && msg == PIGEON_MSG_PAIR_CONFIRM) {
 		// ios_code: DeriveCode(received_server_pub, "client_pub") (set by action)
 		m->state = PIGEON_APP_SHOW_CODE;
 		return 1;
@@ -169,11 +169,11 @@ int pigeon_ios_handle_message(pigeon_ios_machine *m, pairing_ceremony_msg_type m
 
 int pigeon_ios_step(pigeon_ios_machine *m, pairing_ceremony_event_id event)
 {
-	if (m->state == PIGEON_APP_IDLE && event == PIGEON_EVENT_USER_SCANS__Q_R) {
-		m->state = PIGEON_APP_SCAN_Q_R;
+	if (m->state == PIGEON_APP_IDLE && event == PIGEON_EVENT_USER_SCANS_QR) {
+		m->state = PIGEON_APP_SCAN_QR;
 		return 1;
 	}
-	if (m->state == PIGEON_APP_SCAN_Q_R && event == PIGEON_EVENT_Q_R_PARSED) {
+	if (m->state == PIGEON_APP_SCAN_QR && event == PIGEON_EVENT_QR_PARSED) {
 		m->state = PIGEON_APP_CONNECT_RELAY;
 		return 1;
 	}
@@ -217,10 +217,10 @@ void pigeon_cli_machine_init(pigeon_cli_machine *m)
 int pigeon_cli_handle_message(pigeon_cli_machine *m, pairing_ceremony_msg_type msg)
 {
 	if (m->state == PIGEON_CLI_BEGIN_PAIR && msg == PIGEON_MSG_TOKEN_RESPONSE) {
-		m->state = PIGEON_CLI_SHOW_Q_R;
+		m->state = PIGEON_CLI_SHOW_QR;
 		return 1;
 	}
-	if (m->state == PIGEON_CLI_SHOW_Q_R && msg == PIGEON_MSG_WAITING_FOR_CODE) {
+	if (m->state == PIGEON_CLI_SHOW_QR && msg == PIGEON_MSG_WAITING_FOR_CODE) {
 		m->state = PIGEON_CLI_PROMPT_CODE;
 		return 1;
 	}
@@ -233,7 +233,7 @@ int pigeon_cli_handle_message(pigeon_cli_machine *m, pairing_ceremony_msg_type m
 
 int pigeon_cli_step(pigeon_cli_machine *m, pairing_ceremony_event_id event)
 {
-	if (m->state == PIGEON_CLI_IDLE && event == PIGEON_EVENT_CLI___INIT) {
+	if (m->state == PIGEON_CLI_IDLE && event == PIGEON_EVENT_CLI_INIT) {
 		m->state = PIGEON_CLI_GET_KEY;
 		return 1;
 	}

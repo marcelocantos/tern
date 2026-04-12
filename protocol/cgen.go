@@ -359,16 +359,31 @@ func cSnakePrefix(name string) string {
 }
 
 // cSnake converts CamelCase or snake_case to lower_snake_case.
+// Handles acronyms correctly: "ScanQR" → "scan_qr", "E2EReady" → "e2e_ready",
+// "ECDH" → "ecdh". Digits don't trigger word breaks.
 func cSnake(s string) string {
 	var b strings.Builder
-	for i, r := range s {
+	runes := []rune(s)
+	for i, r := range runes {
+		if r == '_' || r == '-' || r == ' ' {
+			b.WriteByte('_')
+			continue
+		}
 		if r >= 'A' && r <= 'Z' {
 			if i > 0 {
-				b.WriteByte('_')
+				prev := runes[i-1]
+				prevIsLetter := (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z')
+				prevLower := prev >= 'a' && prev <= 'z'
+				nextLower := i+1 < len(runes) && runes[i+1] >= 'a' && runes[i+1] <= 'z'
+				// Insert underscore when:
+				// - previous letter was lowercase ("nQ" → "n_q"), OR
+				// - previous was a letter AND next is lowercase (end of
+				//   acronym: "QRp" → "qr_p" but not "QR$" → "qr")
+				if prevLower || (prevIsLetter && nextLower) {
+					b.WriteByte('_')
+				}
 			}
 			b.WriteByte(byte(r - 'A' + 'a'))
-		} else if r == '-' || r == ' ' {
-			b.WriteByte('_')
 		} else {
 			b.WriteRune(r)
 		}
@@ -377,8 +392,14 @@ func cSnake(s string) string {
 }
 
 // cConstName converts a name to UPPER_SNAKE_CASE for C constants.
+// Collapses runs of underscores and trims leading/trailing underscores.
 func cConstName(s string) string {
-	return strings.ToUpper(cSnake(s))
+	snake := strings.ToUpper(cSnake(s))
+	// Collapse multiple underscores.
+	for strings.Contains(snake, "__") {
+		snake = strings.ReplaceAll(snake, "__", "_")
+	}
+	return strings.Trim(snake, "_")
 }
 
 // cConstPrefix returns the UPPER_SNAKE actor prefix.
